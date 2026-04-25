@@ -7,18 +7,18 @@ using Multiplayer.Networking.Data.Jobs;
 namespace Multiplayer.Networking.Packets.Clientbound.Jobs;
 public class ClientboundJobsUpdatePacket
 {
-    public ushort StationNetId { get; set; }
+    public uint StationNetId { get; set; }
     public JobUpdateStruct[] JobUpdates { get; set; }
 
     
-    public static ClientboundJobsUpdatePacket FromNetworkedJobs(ushort stationNetID, NetworkedJob[] jobs)
+    public static ClientboundJobsUpdatePacket FromNetworkedJobs(uint stationNetID, NetworkedJob[] jobs)
     {
         Multiplayer.Log($"ClientboundJobsUpdatePacket.FromNetworkedJobs({stationNetID}, {jobs.Length})");
 
         List<JobUpdateStruct> jobData = new List<JobUpdateStruct>();
         foreach (var job in jobs)
         {
-            ushort validationStationNetId = 0;
+            uint validationStationNetId = 0;
             ushort validationItemNetId = 0;
             ItemPositionData itemPositionData = new ItemPositionData();
 

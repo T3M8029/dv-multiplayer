@@ -771,7 +771,7 @@ public class NetworkedPluggableObject : IdMonoBehaviour<ushort, NetworkedPluggab
                 SocketIndex = (sbyte)Array.IndexOf(trainCar.FuelSockets, socket);
 
                 if (SocketIndex < 0)
-                    Multiplayer.LogWarning(() => $"Socket not recognised for TrainCar [{trainCar.ID}, {netTrainCar.NetId}], socket: {socket.GetObjectPath()}");
+                    Multiplayer.LogWarning($"Socket not recognised for TrainCar [{trainCar.ID}, {netTrainCar.NetId}], socket: {socket.GetObjectPath()}");
             }
             else
             {

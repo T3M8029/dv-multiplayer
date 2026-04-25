@@ -165,7 +165,7 @@ public class NetworkedCashRegisterWithModules : IdMonoBehaviour<ushort, Networke
                     {
                         response = CashRegisterAction.RejectedNoItems;
                     }
-                    else if (Inventory.Instance.PlayerMoney <= CashRegister.GetTotalCost())
+                    else if (CashRegister.DepositedCash < CashRegister.GetTotalCost())
                     {
                         response = CashRegisterAction.RejectFunds;
                     }
@@ -221,7 +221,7 @@ public class NetworkedCashRegisterWithModules : IdMonoBehaviour<ushort, Networke
         }
 
         if (success)
-            NetworkLifecycle.Instance.Server.SendCashRegisterAction(packet, _cullingManager.ActivePlayers.ToArray());
+            NetworkLifecycle.Instance.Server.SendCashRegisterAction(packet, _cullingManager?.ActivePlayers?.ToArray());
         else
             NetworkLifecycle.Instance.Server.SendCashRegisterAction
                 (

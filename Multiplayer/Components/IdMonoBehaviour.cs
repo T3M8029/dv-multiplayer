@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Multiplayer.Components.Networking;
 using Multiplayer.Utils;
@@ -31,7 +32,7 @@ public abstract class IdMonoBehaviour<T, I> : MonoBehaviour where T : struct whe
             return true;
         obj = null;
         if ((netId as dynamic).CompareTo(default(T)) != 0)
-            Multiplayer.LogDebug(() => $"Got invalid NetId {netId} while processing packet {NetworkLifecycle.Instance.IsProcessingPacket}");
+            Multiplayer.LogDebug(() => $"Got invalid NetId {netId} for {typeof(I).Name}{(NetworkLifecycle.Instance.IsProcessingPacket ? $" while processing packet\r\n{Environment.StackTrace}" : "")}");
         return false;
     }
 

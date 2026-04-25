@@ -1,7 +1,9 @@
 using DV;
+using DV.Customization;
 using DV.Customization.Paint;
 using DV.Garages;
 using DV.InventorySystem;
+using DV.LocoRestoration;
 using DV.Logic.Job;
 using DV.Scenarios.Common;
 using DV.ServicePenalty;
@@ -105,18 +107,18 @@ public class NetworkServer : NetworkManager
 
     public override bool Start(int port)
     {
+        Log($"Starting server...");
+
         //setup paint theme lookup cache
         PaintThemeLookup.Instance.CheckInstance();
 
         WorldStreamingInit.LoadingFinished += OnLoaded;
 
-        Log($"Starting server...");
         //Try to get our static IPv6 Address we will need this for IPv6 NAT punching to be reliable
         if (IPAddress.TryParse(LobbyServerManager.GetStaticIPv6Address(), out IPAddress ipv6Address))
         {
             //start the connection, IPv4 messages can come from anywhere, IPv6 messages need to specifically come from the static IPv6
             return base.Start(IPAddress.Any, ipv6Address, port);
-
         }
 
         //we're not running IPv6, start as normal
@@ -125,6 +127,7 @@ public class NetworkServer : NetworkManager
 
     public override void Stop()
     {
+        Log($"Stopping server...");
         WorldStreamingInit.LoadingFinished -= OnLoaded;
 
         if (lobbyServerManager != null)
@@ -152,44 +155,18 @@ public class NetworkServer : NetworkManager
 
     protected override void Subscribe()
     {
-        //Client management
+        // Client management
         netPacketProcessor.SubscribeReusable<ServerboundClientLoginPacket, IConnectionRequest>(OnServerboundClientLoginPacket);
-
-        // World sync
-        netPacketProcessor.SubscribeReusable<ServerboundSaveGameDataRequestPacket, ITransportPeer>(OnServerboundSaveGameDataRequestPacket);
-        netPacketProcessor.SubscribeReusable<ServerboundClientReadyPacket, ITransportPeer>(OnServerboundClientReadyPacket);
-        netPacketProcessor.SubscribeReusable<ServerboundTimeAdvancePacket, ITransportPeer>(OnServerboundTimeAdvancePacket);
-
-
-        netPacketProcessor.SubscribeReusable<ServerboundPlayerPositionPacket, ITransportPeer>(OnServerboundPlayerPositionPacket);
-        netPacketProcessor.SubscribeReusable<ServerboundTrainSyncRequestPacket>(OnServerboundTrainSyncRequestPacket);
-        netPacketProcessor.SubscribeReusable<ServerboundTrainDeleteRequestPacket, ITransportPeer>(OnServerboundTrainDeleteRequestPacket);
-        netPacketProcessor.SubscribeReusable<ServerboundTrainRerailRequestPacket, ITransportPeer>(OnServerboundTrainRerailRequestPacket);
-        netPacketProcessor.SubscribeReusable<ServerboundLicensePurchaseRequestPacket, ITransportPeer>(OnServerboundLicensePurchaseRequestPacket);
-        netPacketProcessor.SubscribeReusable<CommonChangeJunctionPacket, ITransportPeer>(OnCommonChangeJunctionPacket);
-        netPacketProcessor.SubscribeReusable<CommonRotateTurntablePacket, ITransportPeer>(OnCommonRotateTurntablePacket);
-        netPacketProcessor.SubscribeReusable<CommonCouplerInteractionPacket, ITransportPeer>(OnCommonCouplerInteractionPacket);
-
-        netPacketProcessor.SubscribeReusable<CommonTrainUncouplePacket, ITransportPeer>(OnCommonTrainUncouplePacket);
-        netPacketProcessor.SubscribeReusable<CommonHoseConnectedPacket, ITransportPeer>(OnCommonHoseConnectedPacket);
-        netPacketProcessor.SubscribeReusable<CommonHoseDisconnectedPacket, ITransportPeer>(OnCommonHoseDisconnectedPacket);
-        netPacketProcessor.SubscribeReusable<CommonMuConnectedPacket, ITransportPeer>(OnCommonMuConnectedPacket);
-        netPacketProcessor.SubscribeReusable<CommonMuDisconnectedPacket, ITransportPeer>(OnCommonMuDisconnectedPacket);
-        netPacketProcessor.SubscribeReusable<CommonCockFiddlePacket, ITransportPeer>(OnCommonCockFiddlePacket);
-        netPacketProcessor.SubscribeReusable<ServerboundTrainControlAuthorityPacket, ITransportPeer>(OnServerboundTrainControlAuthorityPacket);
-        netPacketProcessor.SubscribeReusable<CommonBrakeCylinderReleasePacket, ITransportPeer>(OnCommonBrakeCylinderReleasePacket);
-        netPacketProcessor.SubscribeReusable<CommonHandbrakePositionPacket, ITransportPeer>(OnCommonHandbrakePositionPacket);
-        netPacketProcessor.SubscribeReusable<CommonPaintThemePacket, ITransportPeer>(OnCommonPaintThemePacket);
-        netPacketProcessor.SubscribeReusable<ServerboundAddCoalPacket, ITransportPeer>(OnServerboundAddCoalPacket);
-        netPacketProcessor.SubscribeReusable<ServerboundTenderCoalPacket, ITransportPeer>(OnServerboundTenderCoalPacket);
-        netPacketProcessor.SubscribeReusable<ServerboundFireboxIgnitePacket, ITransportPeer>(OnServerboundFireboxIgnitePacket);
-        netPacketProcessor.SubscribeReusable<CommonTrainPortsPacket, ITransportPeer>(OnCommonTrainPortsPacket);
-        netPacketProcessor.SubscribeReusable<CommonTrainFusesPacket, ITransportPeer>(OnCommonTrainFusesPacket);
-        netPacketProcessor.SubscribeReusable<ServerboundJobValidateRequestPacket, ITransportPeer>(OnServerboundJobValidateRequestPacket);
-        netPacketProcessor.SubscribeReusable<ServerboundWarehouseMachineControllerRequestPacket, ITransportPeer>(OnServerboundWarehouseMachineControllerRequestPacket);
         netPacketProcessor.SubscribeReusable<CommonChatPacket, ITransportPeer>(OnCommonChatPacket);
         netPacketProcessor.SubscribeReusable<UnconnectedPingPacket, IPEndPoint>(OnUnconnectedPingPacket);
-        netPacketProcessor.SubscribeNetSerializable<CommonItemChangePacket, ITransportPeer>(OnCommonItemChangePacket);
+
+
+        // World sync
+        netPacketProcessor.SubscribeReusable<ServerboundLoadStateUpdatePacket, ITransportPeer>(OnServerboundLoadStateUpdatePacket);
+        netPacketProcessor.SubscribeReusable<ServerboundTimeAdvancePacket, ITransportPeer>(OnServerboundTimeAdvancePacket);
+
+        netPacketProcessor.SubscribeReusable<CommonChangeJunctionPacket, ITransportPeer>(OnCommonChangeJunctionPacket);
+        netPacketProcessor.SubscribeReusable<CommonRotateTurntablePacket, ITransportPeer>(OnCommonRotateTurntablePacket);
 
         netPacketProcessor.SubscribeReusable<CommonPitStopInteractionPacket, ITransportPeer>(OnCommonPitStopInteractionPacket);
         netPacketProcessor.SubscribeNetSerializable<CommonPitStopPlugInteractionPacket, ITransportPeer>(OnCommonPitStopPlugInteractionPacket);
@@ -282,7 +259,7 @@ public class NetworkServer : NetworkManager
             if (peer.ConnectionState.Equals(TransportConnectionState.Connected))
             {
                 System.Console.WriteLine("Connection is established.");
-                OnServerboundClientReadyPacket(null, peer);
+                OnServerboundLoadStateUpdatePacket(new ServerboundLoadStateUpdatePacket { LoadState = PlayerLoadingState.ReadyForWorldState }, peer);
             }
             else
             {
@@ -354,7 +331,8 @@ public class NetworkServer : NetworkManager
             {
                 PlayerId = player.PlayerId
             },
-            DeliveryMethod.ReliableUnordered
+            DeliveryMethod.ReliableUnordered,
+            PlayerLoadingState.Complete
         );
 
         PlayerDisconnected?.Invoke(player);
@@ -373,7 +351,7 @@ public class NetworkServer : NetworkManager
             Ping = latency
         };
 
-        SendPacketToAll(clientboundPingUpdatePacket, DeliveryMethod.ReliableUnordered, peer);
+        SendPacketToAll(clientboundPingUpdatePacket, DeliveryMethod.ReliableUnordered, PlayerLoadingState.None, peer);
 
         if (latency > LATENCY_FLAG)
         {
@@ -400,7 +378,7 @@ public class NetworkServer : NetworkManager
 
     #region Packet Senders
 
-    private void SendPacketToAll<T>(T packet, DeliveryMethod deliveryMethod, bool excludeSelf = false) where T : class, new()
+    private void SendPacketToAll<T>(T packet, DeliveryMethod deliveryMethod, PlayerLoadingState minimumLoadState, bool excludeSelf = false) where T : class, new()
     {
         NetDataWriter writer = WritePacket(packet);
         foreach (var peer in peers.Values)
@@ -412,12 +390,15 @@ public class NetworkServer : NetworkManager
         }
     }
 
-    private void SendPacketToAll<T>(T packet, DeliveryMethod deliveryMethod, ITransportPeer excludePeer, bool excludeSelf = false) where T : class, new()
+    private void SendPacketToAll<T>(T packet, DeliveryMethod deliveryMethod, PlayerLoadingState minimumLoadState, ITransportPeer excludePeer, bool excludeSelf = false) where T : class, new()
     {
         NetDataWriter writer = WritePacket(packet);
         foreach (var peer in peers.Values)
         {
             if (peer == excludePeer || (excludeSelf && peer == SelfPeer))
+                continue;
+
+            if (TryGetServerPlayer(peer, out var player) && player.LoadingState < minimumLoadState)
                 continue;
 
             peer?.Send(writer, deliveryMethod);
@@ -451,7 +432,7 @@ public class NetworkServer : NetworkManager
     public void SendExternalPacketToAll<T>(T packet, bool reliable, bool excludeSelf = false) where T : class, IPacket, new()
     {
         var deliveryMethod = reliable ? DeliveryMethod.ReliableUnordered : DeliveryMethod.Unreliable;
-        SendPacketToAll(packet, deliveryMethod, excludeSelf);
+        SendPacketToAll(packet, deliveryMethod, PlayerLoadingState.None, excludeSelf);
     }
 
     public void SendExternalPacketToAll<T>(T packet, bool reliable, ITransportPeer excludePeer, bool excludeSelf = false) where T : class, IPacket, new()
@@ -459,9 +440,9 @@ public class NetworkServer : NetworkManager
         var deliveryMethod = reliable ? DeliveryMethod.ReliableUnordered : DeliveryMethod.Unreliable;
 
         if (excludePeer == null)
-            SendPacketToAll(packet, deliveryMethod, excludeSelf);
+            SendPacketToAll(packet, deliveryMethod, PlayerLoadingState.None, excludeSelf);
         else
-            SendPacketToAll(packet, deliveryMethod, excludePeer, excludeSelf);
+            SendPacketToAll(packet, deliveryMethod, PlayerLoadingState.None, excludePeer, excludeSelf);
     }
 
     public void SendExternalSerializablePacketToAll<T>(T packet, bool reliable, bool excludeSelf = false) where T : class, ISerializablePacket, new()
@@ -522,7 +503,7 @@ public class NetworkServer : NetworkManager
 
     public void SendGameParams(GameParams gameParams)
     {
-        SendPacketToAll(ClientboundGameParamsPacket.FromGameParams(gameParams), DeliveryMethod.ReliableOrdered, excludeSelf: true);
+        SendPacketToAll(ClientboundGameParamsPacket.FromGameParams(gameParams), DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForGameData, excludeSelf: true);
     }
 
     public void SendWeatherState(ITransportPeer peer = null)
@@ -532,10 +513,10 @@ public class NetworkServer : NetworkManager
         if (peer != null)
             SendPacket(peer, packet, DeliveryMethod.ReliableOrdered);
         else
-            SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, excludeSelf: true);
+            SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForWorldState, excludeSelf: true);
     }
 
-    public void SendSpawnTrainset(List<TrainCar> set, bool autoCouple, bool sendToAll, bool playerSpawned = false, ITransportPeer sendTo = null)
+    public void SendSpawnTrainset(List<TrainCar> set, bool autoCouple, bool sendToAll, ITransportPeer sendTo = null)
     {
 
         LogDebug(() =>
@@ -553,7 +534,7 @@ public class NetworkServer : NetworkManager
 
         });
 
-        var packet = ClientboundSpawnTrainSetPacket.FromTrainSet(set, autoCouple, playerSpawned);
+        var packet = ClientboundSpawnTrainSetPacket.FromTrainSet(set, autoCouple);
 
         if (!sendToAll)
         {
@@ -563,7 +544,7 @@ public class NetworkServer : NetworkManager
                 SendPacket(sendTo, packet, DeliveryMethod.ReliableOrdered);
         }
         else
-            SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, SelfPeer);
+            SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForTrainSets, SelfPeer);
     }
 
     public void SendDestroyTrainCar(NetworkedTrainCar netTrainCar, ITransportPeer peer = null)
@@ -580,7 +561,7 @@ public class NetworkServer : NetworkManager
         var packet = new ClientboundDestroyTrainCarPacket { NetId = netTrainCar.NetId };
 
         if (peer == null)
-            SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, SelfPeer);
+            SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForTrainSets, SelfPeer);
         else
             SendPacket(peer, packet, DeliveryMethod.ReliableOrdered);
     }
@@ -588,7 +569,7 @@ public class NetworkServer : NetworkManager
     public void SendTrainsetPhysicsUpdate(ClientboundTrainsetPhysicsPacket packet, bool reliable)
     {
         //LogDebug(() => $"Sending Physics packet for netId: {packet.FirstNetId}, tick: {packet.Tick}");
-        SendPacketToAll(packet, reliable ? DeliveryMethod.ReliableOrdered : DeliveryMethod.Unreliable, SelfPeer);
+        SendPacketToAll(packet, reliable ? DeliveryMethod.ReliableOrdered : DeliveryMethod.Unreliable, PlayerLoadingState.ReadyForTrainSets, SelfPeer);
     }
 
     public void SendBrakeState(ushort netId, float mainReservoirPressure, float brakePipePressure, float brakeCylinderPressure, float overheatPercent, float overheatReductionFactor, float temperature)
@@ -602,7 +583,7 @@ public class NetworkServer : NetworkManager
             OverheatPercent = overheatPercent,
             OverheatReductionFactor = overheatReductionFactor,
             Temperature = temperature
-        }, DeliveryMethod.ReliableOrdered, SelfPeer);
+        }, DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForTrainSets, SelfPeer);
 
         //LogDebug(()=> $"Sending Brake Pressures netId {netId}: {mainReservoirPressure}, {independentPipePressure}, {brakePipePressure}, {brakeCylinderPressure}");
     }
@@ -644,7 +625,7 @@ public class NetworkServer : NetworkManager
             CargoHealth = netTraincar.TrainCar.CargoDamage.HealthPercentage,
             CargoModelIndex = cargoModelIndex,
             WarehouseMachineNetId = netMachineId,
-        }, DeliveryMethod.ReliableOrdered, SelfPeer);
+        }, DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForTrainSets, SelfPeer);
     }
 
     public void SendPaintThemeChange(NetworkedTrainCar netTraincar, TrainCarPaint.Target targetArea, uint themeNetId, ServerPlayer sendToPlayer = null)
@@ -661,7 +642,21 @@ public class NetworkServer : NetworkManager
         if (sendToPlayer != null)
             SendPacket(sendToPlayer.Peer, packet, DeliveryMethod.ReliableUnordered);
         else
-            SendPacketToAll(packet, DeliveryMethod.ReliableUnordered, true);
+            SendPacketToAll(packet, DeliveryMethod.ReliableUnordered, PlayerLoadingState.ReadyForTrainSets, true);
+    }
+
+    public void SendRestorationStateChange(ushort netId, LocoRestorationController.RestorationState newState, ushort[] transportCars)
+    {
+        var packet = new ClientboundRestorationStateChangePacket
+        {
+            NetId = netId,
+            NewState = newState,
+            TransportCarNetIds = transportCars
+        };
+
+        Log($"Sending restoration state change for {netId}, new state: {newState}, transport cars count: {transportCars?.Count() ?? 0}");
+
+        SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForItems, true);
     }
 
     public void SendWarehouseControllerUpdate(ushort netId, bool isLoading, ushort jobNetId, ushort carNetId, uint cargoTypeNetId, WarehouseMachineController.TextPreset preset)
@@ -677,7 +672,7 @@ public class NetworkServer : NetworkManager
             CargoTypeNetId = cargoTypeNetId,
             Preset = (ushort)preset,
         },
-        DeliveryMethod.Sequenced, SelfPeer);
+        DeliveryMethod.Sequenced, PlayerLoadingState.ReadyForJobs, SelfPeer);
     }
 
     public void SendCargoHealthUpdate(ushort netId, float currentHealth)
@@ -686,7 +681,7 @@ public class NetworkServer : NetworkManager
         {
             NetId = netId,
             CargoHealth = currentHealth,
-        }, DeliveryMethod.ReliableOrdered, SelfPeer);
+        }, DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForTrainSets, SelfPeer);
     }
 
     public void SendCarHealthUpdate(ushort netId, TrainCarHealthData health)
@@ -698,7 +693,7 @@ public class NetworkServer : NetworkManager
         {
             NetId = netId,
             Health = health
-        }, DeliveryMethod.ReliableOrdered, SelfPeer);
+        }, DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForTrainSets, SelfPeer);
     }
 
     public void SendRerailTrainCar(ushort netId, ushort rerailTrack, Vector3 worldPos, Vector3 forward)
@@ -709,7 +704,7 @@ public class NetworkServer : NetworkManager
             TrackId = rerailTrack,
             Position = worldPos,
             Forward = forward
-        }, DeliveryMethod.ReliableOrdered, SelfPeer);
+        }, DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForTrainSets, SelfPeer);
     }
 
     public void SendMoveTrainCarToTrack(ushort netId, ushort destinationTrack, Vector3 worldPos, Vector3 forward, bool isTeleporting)
@@ -723,8 +718,8 @@ public class NetworkServer : NetworkManager
                 TrackId = destinationTrack,
                 Position = worldPos,
                 Forward = forward,
-                IsTeleporting = isTeleporting 
-            }, DeliveryMethod.ReliableOrdered, true
+                IsTeleporting = isTeleporting
+            }, DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForTrainSets, true
         );
     }
 
@@ -736,7 +731,7 @@ public class NetworkServer : NetworkManager
             {
                 NetId = netId,
                 ForceDirection = forceDirection
-            }, DeliveryMethod.ReliableUnordered, SelfPeer
+            }, DeliveryMethod.ReliableUnordered, PlayerLoadingState.ReadyForTrainSets, SelfPeer
         );
     }
 
@@ -749,6 +744,7 @@ public class NetworkServer : NetworkManager
                 NetId = netId
             },
             DeliveryMethod.ReliableUnordered,
+            PlayerLoadingState.ReadyForTrainSets,
             excludeSelf: true
         );
     }
@@ -762,6 +758,7 @@ public class NetworkServer : NetworkManager
                 Amount = amount
             },
             DeliveryMethod.ReliableUnordered,
+            PlayerLoadingState.ReadyForWorldState,
             excludeSelf: true
         );
     }
@@ -776,6 +773,7 @@ public class NetworkServer : NetworkManager
                 IsJobLicense = isJobLicense
             },
             DeliveryMethod.ReliableUnordered,
+            PlayerLoadingState.ReadyForWorldState,
             excludeSelf: true
         );
     }
@@ -789,16 +787,22 @@ public class NetworkServer : NetworkManager
                 Id = id
             },
             DeliveryMethod.ReliableUnordered,
+            PlayerLoadingState.ReadyForWorldState,
             excludeSelf: true
         );
     }
 
     public void SendDebtStatus(bool hasDebt)
     {
-        SendPacketToAll(new ClientboundDebtStatusPacket
-        {
-            HasDebt = hasDebt
-        }, DeliveryMethod.ReliableUnordered, SelfPeer);
+        SendPacketToAll
+        (
+            new ClientboundDebtStatusPacket
+            {
+                HasDebt = hasDebt
+            }, DeliveryMethod.ReliableUnordered,
+            PlayerLoadingState.ReadyForWorldState,
+            SelfPeer
+        );
     }
 
     public void SendPlayerPreferencesUpdate(ServerPlayer player)
@@ -811,7 +815,7 @@ public class NetworkServer : NetworkManager
             CrewName = player.CrewName
         };
 
-        SendPacketToAll(packet, DeliveryMethod.ReliableUnordered);
+        SendPacketToAll(packet, DeliveryMethod.ReliableUnordered, PlayerLoadingState.Complete);
     }
 
     public void SendTrainUncouple(Coupler coupler, bool playAudio, bool dueToBrokenCouple, bool viaChainInteraction)
@@ -836,6 +840,7 @@ public class NetworkServer : NetworkManager
                 DueToBrokenCouple = dueToBrokenCouple,
             },
             DeliveryMethod.ReliableOrdered,
+            PlayerLoadingState.ReadyForTrainSets,
             excludeSelf: true
         );
     }
@@ -861,6 +866,7 @@ public class NetworkServer : NetworkManager
                 PlayAudio = playAudio
             },
             DeliveryMethod.ReliableOrdered,
+            PlayerLoadingState.ReadyForTrainSets,
             excludeSelf: true
         );
     }
@@ -876,6 +882,7 @@ public class NetworkServer : NetworkManager
                 IsOpen = isOpen
             },
             DeliveryMethod.ReliableOrdered,
+            PlayerLoadingState.ReadyForTrainSets,
             true
         );
     }
@@ -891,9 +898,9 @@ public class NetworkServer : NetworkManager
 
         if (sendToPlayer == null)
             if (excludePlayer == null)
-                SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, excludeSelf: true);
+                SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForTrainSets, excludeSelf: false);
             else
-                SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, excludePlayer.Peer, true);
+                SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForTrainSets, excludePlayer.Peer, false);
         else
             SendPacket(sendToPlayer.Peer, packet, DeliveryMethod.ReliableOrdered);
     }
@@ -905,15 +912,15 @@ public class NetworkServer : NetworkManager
         var packet = ClientboundJobsCreatePacket.FromNetworkedJobs(networkedStation, jobs);
 
         if (peer == null)
-            SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, excludeSelf: true);
+            SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForJobs, excludeSelf: true);
         else
             SendPacket(peer, packet, DeliveryMethod.ReliableOrdered);
     }
 
-    public void SendJobsUpdatePacket(ushort stationNetId, NetworkedJob[] jobs)
+    public void SendJobsUpdatePacket(uint stationNetId, NetworkedJob[] jobs)
     {
         Multiplayer.Log($"Sending JobsUpdatePacket for stationNetId {stationNetId} with {jobs.Count()} jobs");
-        SendPacketToAll(ClientboundJobsUpdatePacket.FromNetworkedJobs(stationNetId, jobs), DeliveryMethod.ReliableOrdered, excludeSelf: true);
+        SendPacketToAll(ClientboundJobsUpdatePacket.FromNetworkedJobs(stationNetId, jobs), DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForJobs, excludeSelf: true);
     }
 
     public void SendTaskUpdate(ushort taskNetId, TaskState newState, float taskStartTime, float taskFinishTime)
@@ -929,6 +936,7 @@ public class NetworkServer : NetworkManager
                 TaskFinishTime = taskFinishTime
             },
             DeliveryMethod.ReliableOrdered,
+            PlayerLoadingState.ReadyForJobs,
             excludeSelf: true
         );
     }
@@ -978,7 +986,7 @@ public class NetworkServer : NetworkManager
     public void SendCashRegisterAction(CommonCashRegisterWithModulesActionPacket packet, ServerPlayer[] players = null)
     {
         if (players == null)
-            SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, true);
+            SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForWorldState, true);
         else
             foreach (var player in players)
                 SendPacket(player.Peer, packet, DeliveryMethod.ReliableOrdered);
@@ -995,7 +1003,7 @@ public class NetworkServer : NetworkManager
         if (player != null)
             SendPacket(player.Peer, packet, DeliveryMethod.ReliableOrdered);
         else
-            SendPacketToAll(packet, deliveryMethod: DeliveryMethod.ReliableOrdered, true);
+            SendPacketToAll(packet, deliveryMethod: DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForWorldState, true);
     }
 
     public void SendChat(string message, ServerPlayer exclude = null)
@@ -1006,9 +1014,9 @@ public class NetworkServer : NetworkManager
         };
 
         if (exclude != null)
-            SendPacketToAll(packet, DeliveryMethod.ReliableUnordered, exclude.Peer);
+            SendPacketToAll(packet, DeliveryMethod.ReliableUnordered, PlayerLoadingState.Complete, exclude.Peer);
         else
-            SendPacketToAll(packet, DeliveryMethod.ReliableUnordered);
+            SendPacketToAll(packet, DeliveryMethod.ReliableUnordered, PlayerLoadingState.Complete);
     }
 
     public void SendWhisper(string message, ServerPlayer recipient)
@@ -1135,6 +1143,10 @@ public class NetworkServer : NetworkManager
             return;
         }
 
+        // Unpause physics
+        if (AppUtil.Instance.IsTimePaused)
+            AppUtil.Instance.RequestSystemOnValueChanged(0.0f);
+
         ITransportPeer peer = request.Accept();
 
         ServerPlayer serverPlayer = new
@@ -1158,138 +1170,166 @@ public class NetworkServer : NetworkManager
         SendPacket(peer, acceptPacket, DeliveryMethod.ReliableUnordered);
     }
 
-    private void OnServerboundSaveGameDataRequestPacket(ServerboundSaveGameDataRequestPacket packet, ITransportPeer peer)
+    private void OnServerboundLoadStateUpdatePacket(ServerboundLoadStateUpdatePacket packet, ITransportPeer peer)
     {
-        LogDebug(() => $"OnServerboundSaveGameDataRequestPacket from peerId: {peer.Id}");
-
+        LogDebug(() => $"OnServerboundLoadStateUpdatePacket from peerId: {peer.Id}, loadState: {packet.LoadState}");
         if (!TryGetServerPlayer(peer, out ServerPlayer player))
         {
-            LogError($"Save game data request received for {peer.GetType()}, peerId: {peer.Id}, but ServerPlayer not found");
+            LogError($"Load state update received for {peer.GetType()}, peerId: {peer.Id}, but ServerPlayer not found");
             peer.Disconnect();
             return;
         }
 
-        Log($"Player {player.Username} requested save game data");
-
-        PlayerConnected?.Invoke(player);
-
-        //if (peers.ContainsKey((byte)peer.Id))
-        //{
-        //    LogWarning("Denied save game data request from already connected peer!");
-        //    return;
-        //}
-
-        SendPacket(peer, ClientboundGameParamsPacket.FromGameParams(Globals.G.GameParams), DeliveryMethod.ReliableOrdered);
-        SendPacket(peer, ClientboundSaveGameDataPacket.CreatePacket(player), DeliveryMethod.ReliableOrdered);
-    }
-
-    private void OnServerboundClientReadyPacket(ServerboundClientReadyPacket packet, ITransportPeer peer)
-    {
-        LogDebug(() => $"OnServerboundClientReadyPacket from peerId: {peer.Id}");
-
-        if (!peerToPlayer.TryGetValue(peer, out ServerPlayer serverPlayer))
+        if (player.LoadingState >= packet.LoadState)
         {
-            LogError($"Ready packet received for {peer.GetType()}, peerId: {peer.Id}, but ServerPlayer not found");
-            peer.Disconnect();
+            LogWarning($"Player {player.Username} reported load state {packet.LoadState}, but is currently at load state {player.LoadingState}!");
+            KickPlayer(player);
             return;
         }
 
-        // Allow clients to connect before the server is fully loaded
-        if (!IsLoaded)
+        switch (packet.LoadState)
         {
-            Log($"Player {serverPlayer.Username} is ready, adding to the queue");
+            case PlayerLoadingState.None:
+                LogWarning($"Player {player.Username} sent unexpected state: {packet.LoadState}");
 
-            joinQueue.Enqueue(peer);
-            SendPacket(peer, new ClientboundServerLoadingPacket(), DeliveryMethod.ReliableOrdered);
+                break;
 
-            return;
-        }
+            case PlayerLoadingState.ReadyForGameData:
+                Log($"Player {player.Username} is ready for game data");
 
-        // Unpause physics
-        if (AppUtil.Instance.IsTimePaused)
-            AppUtil.Instance.RequestSystemOnValueChanged(0.0f);
+                PlayerConnected?.Invoke(player);
 
-        // Allow the player to receive packets
-        peers.Add(serverPlayer.PlayerId, peer);
+                SendPacket(peer, ClientboundGameParamsPacket.FromGameParams(Globals.G.GameParams), DeliveryMethod.ReliableOrdered);
+                SendPacket(peer, ClientboundSaveGameDataPacket.CreatePacket(player), DeliveryMethod.ReliableOrdered);
 
-        // Send the new player to all other players
-        ClientboundPlayerJoinedPacket clientboundPlayerJoinedPacket = new()
-        {
-            PlayerId = serverPlayer.PlayerId,
-            Username = serverPlayer.Username,
-        };
-        SendPacketToAll(clientboundPlayerJoinedPacket, DeliveryMethod.ReliableOrdered, peer);
+                break;
 
-        LogDebug(() => $"Chatmanager");
-        ChatManager.ServerMessage(serverPlayer.Username + " joined the game", null, serverPlayer);
-
-        // No need to sync the world state if the player is the host
-        if (NetworkLifecycle.Instance.IsHost(serverPlayer))
-        {
-            Log($"Server loaded. Triggering loading screen removal");
-
-            SendPacket(peer, new ClientboundRemoveLoadingScreenPacket(), DeliveryMethod.ReliableOrdered);
-            serverPlayer.IsLoaded = true;
-            PlayerReady?.Invoke(serverPlayer);
-            return;
-        }
-
-        Log($"Player {serverPlayer.Username} is ready. Sending world state");
-        SendPacket(peer, new ClientboundBeginWorldSyncPacket(), DeliveryMethod.ReliableOrdered);
-
-        // Send weather state
-        SendWeatherState(peer);
-
-        // Send junctions and turntables
-        SendPacket(peer, new ClientboundRailwayStatePacket
-        {
-            SelectedJunctionBranches = NetworkedJunction.IndexedJunctions.Select(j => j.Junction.selectedBranch).ToArray(),
-            TurntableRotations = NetworkedTurntable.IndexedTurntables.Select(j => j.TurntableRailTrack.currentYRotation).ToArray()
-        }, DeliveryMethod.ReliableOrdered);
-
-        // Send trains
-        foreach (Trainset set in Trainset.allSets)
-        {
-            try
-            {
-                SendSpawnTrainset(set.cars, false, false, false, peer);
-            }
-            catch (Exception e)
-            {
-                LogWarning($"Exception when trying to send train set spawn data for [{set?.firstCar?.ID}, {set?.firstCar?.GetNetId()}]\r\n{e.Message}\r\n{e.StackTrace}");
-            }
-        }
-
-        // Sync Stations (match NetIDs with StationIDs) - we could do this the same as junctions but juntions may need to be upgraded to work this way - future planning for mod integration
-        SendPacket(peer, new ClientboundStationControllerLookupPacket(NetworkedStationController.GetAll().ToArray()), DeliveryMethod.ReliableOrdered);
-
-        //send jobs
-        foreach (StationController station in StationController.allStations)
-        {
-            if (NetworkedStationController.GetFromStationController(station, out NetworkedStationController netStation))
-            {
-                //only send active jobs (available or in progress) - new clients don't need to know about old jobs
-                NetworkedJob[] jobs = netStation.NetworkedJobs
-                    .Where(j => j.Job.State == JobState.Available || j.Job.State == JobState.InProgress)
-                    .ToArray();
-
-                for (int i = 0; i < jobs.Length; i++)
+            case PlayerLoadingState.ReadyForWorldState:
+                if (!IsLoaded)
                 {
-                    SendJobsCreatePacket(netStation, [jobs[i]], peer);
+                    Log($"Player {player.Username} is ready but server is still loading, adding to the queue");
+
+                    joinQueue.Enqueue(peer);
+                    SendPacket(peer, new ClientboundServerLoadingPacket(), DeliveryMethod.ReliableOrdered);
+
+                    return;
                 }
-            }
-            else
-            {
-                LogError($"Sending job packets... Failed to get NetworkedStation from station");
-            }
+                else
+                {
+                    Log($"Player {player.Username} is ready for world state");
+                }
+
+                // Unpause physics
+                if (AppUtil.Instance.IsTimePaused)
+                    AppUtil.Instance.RequestSystemOnValueChanged(0.0f);
+
+                // Allow the player to receive packets
+                peers.Add(player.PlayerId, peer);
+
+                if (NetworkLifecycle.Instance.IsHost(player))
+                {
+                    Log($"Server loaded. Triggering loading screen removal");
+                    packet.LoadState = PlayerLoadingState.Complete;
+                    break;
+                }
+
+                // Send weather state
+                SendWeatherState(peer);
+
+                // Send junctions and turntables
+                SendPacket(peer, new ClientboundRailwayStatePacket
+                {
+                    SelectedJunctionBranches = NetworkedJunction.IndexedJunctions.Select(j => j.Junction.selectedBranch).ToArray(),
+                    TurntableRotations = NetworkedTurntable.IndexedTurntables.Select(j => j.TurntableRailTrack.currentYRotation).ToArray()
+                }, DeliveryMethod.ReliableOrdered);
+
+                // Send generic switch states
+                foreach (var genericSwitch in NetworkedGenericSwitch.AllSwitches)
+                {
+                    SendPacket(peer, new CommonGenericSwitchStatePacket
+                    {
+                        NetId = genericSwitch.NetId,
+                        IsOn = genericSwitch.IsOn
+                    }, DeliveryMethod.ReliableOrdered);
+                }
+
+                break;
+
+            case PlayerLoadingState.ReadyForTrainSets:
+                // Inform client of total trainsets to be loaded
+                SendPacket(peer, new ClientboundLoadStateInfoPacket
+                {
+                    LoadingState = PlayerLoadingState.ReadyForTrainSets,
+                    ItemsToLoad = (uint)Trainset.allSets.Count()
+                }, DeliveryMethod.ReliableOrdered);
+
+                // Send trains
+                foreach (Trainset set in Trainset.allSets)
+                {
+                    try
+                    {
+                        SendSpawnTrainset(set.cars, false, false, peer);
+                    }
+                    catch (Exception e)
+                    {
+                        LogWarning($"Exception when trying to send train set spawn data for [{set?.firstCar?.ID}, {set?.firstCar?.GetNetId()}]\r\n{e.Message}\r\n{e.StackTrace}");
+                    }
+                }
+
+                break;
+
+            case PlayerLoadingState.ReadyForItems:
+                // Send Inventory and world items
+
+                break;
+
+            case PlayerLoadingState.ReadyForJobs:
+
+                // Send Job Data
+                foreach (StationController station in StationController.allStations)
+                {
+                    if (NetworkedStationController.GetFromStationController(station, out NetworkedStationController netStation))
+                    {
+                        //only send active jobs (available or in progress) - new clients don't need to know about old jobs
+                        NetworkedJob[] jobs = netStation.NetworkedJobs
+                            .Where(j => j.Job.State == JobState.Available || j.Job.State == JobState.InProgress)
+                            .ToArray();
+
+                        for (int i = 0; i < jobs.Length; i++)
+                        {
+                            SendJobsCreatePacket(netStation, [jobs[i]], peer);
+                        }
+                    }
+                    else
+                    {
+                        LogError($"Sending job packets... Failed to get NetworkedStation from station {station?.stationInfo?.Name}");
+                    }
+                }
+                break;
+
+            case PlayerLoadingState.ReadyForTiles:
+                // Send Hazmat data
+                break;
+
+            case PlayerLoadingState.Complete:
+
+                break;
+
+            default:
+                LogWarning($"Player {player.Username} sent unexpected load state: {packet.LoadState}");
+                KickPlayer(player);
+
+                break;
         }
 
-        // Send existing players
-        foreach (ServerPlayer player in ServerPlayers)
+        player.LoadingState = packet.LoadState;
+
+        if (packet.LoadState == PlayerLoadingState.Complete)
         {
-            if (player.PlayerId == serverPlayer.PlayerId)
-                continue;
-            SendPacket(peer, new ClientboundPlayerJoinedPacket
+            Log($"Player {player.Username} has completed loading");
+
+            // Send the new player to all other players
+            ClientboundPlayerJoinedPacket clientboundPlayerJoinedPacket = new()
             {
                 PlayerId = player.PlayerId,
                 Username = player.Username,
@@ -1297,16 +1337,33 @@ public class NetworkServer : NetworkManager
                 CarID = player.CarId,
                 Position = player.RawPosition,
                 Rotation = player.RawRotationY
-            }, DeliveryMethod.ReliableOrdered);
+            };
+
+            SendPacketToAll(clientboundPlayerJoinedPacket, DeliveryMethod.ReliableOrdered, PlayerLoadingState.Complete, peer);
+
+            // Announce player joined
+            ChatManager.ServerMessage(player.Username + " joined the game", null, player);
+
+            // Send existing players
+            foreach (ServerPlayer otherPlayer in ServerPlayers)
+            {
+                if (player.PlayerId == otherPlayer.PlayerId)
+                    continue;
+
+                SendPacket(peer, new ClientboundPlayerJoinedPacket
+                {
+                    PlayerId = otherPlayer.PlayerId,
+                    Username = otherPlayer.Username,
+                    CrewName = otherPlayer.CrewName,
+                    CarID = otherPlayer.CarId,
+                    Position = otherPlayer.RawPosition,
+                    Rotation = otherPlayer.RawRotationY
+                }, DeliveryMethod.ReliableOrdered);
+            }
+
+            SendPacket(peer, new ClientboundRemoveLoadingScreenPacket(), DeliveryMethod.ReliableOrdered);
+            PlayerReady?.Invoke(player);
         }
-
-        // All data has been sent, allow the client to load into the world.
-        Log($"World state sent to {serverPlayer.Username}. Triggering loading screen removal");
-        SendPacket(peer, new ClientboundRemoveLoadingScreenPacket(), DeliveryMethod.ReliableOrdered);
-
-        serverPlayer.IsLoaded = true;
-
-        PlayerReady?.Invoke(serverPlayer);
     }
 
     private void OnServerboundPlayerPositionPacket(ServerboundPlayerPositionPacket packet, ITransportPeer peer)
@@ -1331,7 +1388,7 @@ public class NetworkServer : NetworkManager
             CarID = packet.CarID
         };
 
-        SendPacketToAll(clientboundPacket, DeliveryMethod.Sequenced, peer);
+        SendPacketToAll(clientboundPacket, DeliveryMethod.Sequenced, PlayerLoadingState.Complete, peer);
     }
 
     private void OnServerboundTimeAdvancePacket(ServerboundTimeAdvancePacket packet, ITransportPeer peer)
@@ -1343,18 +1400,19 @@ public class NetworkServer : NetworkManager
                 amountOfTimeToSkipInSeconds = packet.amountOfTimeToSkipInSeconds
             },
             DeliveryMethod.ReliableUnordered,
+            PlayerLoadingState.ReadyForWorldState,
             peer
         );
     }
 
     private void OnCommonChangeJunctionPacket(CommonChangeJunctionPacket packet, ITransportPeer peer)
     {
-        SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, peer);
+        SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForWorldState, peer);
     }
 
     private void OnCommonRotateTurntablePacket(CommonRotateTurntablePacket packet, ITransportPeer peer)
     {
-        SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, peer);
+        SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForWorldState, peer);
     }
 
     private void OnCommonCouplerInteractionPacket(CommonCouplerInteractionPacket packet, ITransportPeer peer)
@@ -1371,7 +1429,7 @@ public class NetworkServer : NetworkManager
             if (netTrainCar.Server_ValidateCouplerInteraction(packet, player))
             {
                 //passed validation, send to all but the originator
-                SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, peer);
+                SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForTrainSets, peer);
             }
             else
             {
@@ -1405,42 +1463,42 @@ public class NetworkServer : NetworkManager
 
     private void OnCommonTrainUncouplePacket(CommonTrainUncouplePacket packet, ITransportPeer peer)
     {
-        SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, peer);
+        SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForTrainSets, peer);
     }
 
     private void OnCommonHoseConnectedPacket(CommonHoseConnectedPacket packet, ITransportPeer peer)
     {
-        SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, peer);
+        SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForTrainSets, peer);
     }
 
     private void OnCommonHoseDisconnectedPacket(CommonHoseDisconnectedPacket packet, ITransportPeer peer)
     {
-        SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, peer);
+        SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForTrainSets, peer);
     }
 
     private void OnCommonMuConnectedPacket(CommonMuConnectedPacket packet, ITransportPeer peer)
     {
-        SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, peer);
+        SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForTrainSets, peer);
     }
 
     private void OnCommonMuDisconnectedPacket(CommonMuDisconnectedPacket packet, ITransportPeer peer)
     {
-        SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, peer);
+        SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForTrainSets, peer);
     }
 
     private void OnCommonCockFiddlePacket(CommonCockFiddlePacket packet, ITransportPeer peer)
     {
-        SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, peer);
+        SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForTrainSets, peer);
     }
 
     private void OnCommonBrakeCylinderReleasePacket(CommonBrakeCylinderReleasePacket packet, ITransportPeer peer)
     {
-        SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, peer);
+        SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForTrainSets, peer);
     }
 
     private void OnCommonHandbrakePositionPacket(CommonHandbrakePositionPacket packet, ITransportPeer peer)
     {
-        SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, peer);
+        SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForTrainSets, peer);
     }
 
     private void OnCommonPaintThemePacket(CommonPaintThemePacket packet, ITransportPeer peer)
@@ -1541,7 +1599,7 @@ public class NetworkServer : NetworkManager
             }
         }
 
-        SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, peer);
+        SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForTrainSets, peer);
     }
 
     private void OnServerboundTrainControlAuthorityPacket(ServerboundTrainControlAuthorityPacket packet, ITransportPeer peer)
@@ -1556,7 +1614,7 @@ public class NetworkServer : NetworkManager
 
     private void OnCommonTrainFusesPacket(CommonTrainFusesPacket packet, ITransportPeer peer)
     {
-        SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, peer);
+        SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForTrainSets, peer);
     }
 
     private void OnServerboundTrainSyncRequestPacket(ServerboundTrainSyncRequestPacket packet)
@@ -1761,7 +1819,7 @@ public class NetworkServer : NetworkManager
             LogDebug(() => $"OnServerboundWorkTrainRequestPacket() {player.Username} tried to request a work train of {livery.id} but no existing car found, spawning new car");
             trainCar = CarSpawner.Instance.SpawnCrewVehicle(livery, networkedRailTrack.RailTrack, (Vector3)spawnPoint.position, forward, selectedGarageSpawner);
 
-            SendSpawnTrainset([trainCar], true, true, true);
+            SendSpawnTrainset([trainCar], true, true);
         }
         else
         {

@@ -186,7 +186,8 @@ public class NetworkedPitStopStation : IdMonoBehaviour<ushort, NetworkedPitStopS
 
             NetworkLifecycle.Instance.OnTick -= OnTick;
 
-            NetworkLifecycle.Instance.Server.PlayerDisconnected -= OnPlayerDisconnect;
+            if (NetworkLifecycle.Instance.Server != null)
+                NetworkLifecycle.Instance.Server.PlayerDisconnected -= OnPlayerDisconnect;
 
             // Monitor changes to vehicles in the pit stop
             Station.pitstop.CarEntered -= OnCarPitStopEntered;
@@ -401,7 +402,7 @@ public class NetworkedPitStopStation : IdMonoBehaviour<ushort, NetworkedPitStopS
             }
             else
             {
-                Multiplayer.LogWarning(() => $"NetworkedPitStopStation.SendResourceUpdate({module.resourceType}) [{StationName}, {NetId}], player is null, skipping send");
+                Multiplayer.LogWarning($"NetworkedPitStopStation.SendResourceUpdate({module.resourceType}) [{StationName}, {NetId}], player is null, skipping send");
             }
         }
     }

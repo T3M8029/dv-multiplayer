@@ -529,7 +529,7 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
                 }
                 else
                 {
-                    Multiplayer.LogWarning(() => $"NetworkedItem.ApplyTrackedValues() itemNetId: {NetId}, item name: {name}. Skipped server-authoritative value update from client: {newValue.Key}");
+                    Multiplayer.LogWarning($"NetworkedItem.ApplyTrackedValues() itemNetId: {NetId}, item name: {name}. Skipped server-authoritative value update from client: {newValue.Key}");
                 }
             }
             else

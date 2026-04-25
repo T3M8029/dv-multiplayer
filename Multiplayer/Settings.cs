@@ -4,6 +4,7 @@ using Multiplayer.Utils;
 using System;
 using UnityEngine;
 using UnityModManagerNet;
+using static Multiplayer.Components.Networking.UI.PlayerListGUI;
 using static Multiplayer.Patches.Mods.RemoteDispatchPatch;
 using Console = DV.Console;
 
@@ -63,7 +64,7 @@ public class Settings : UnityModManager.ModSettings, IDrawable
     public int LastRemotePort = 7777;
     [Draw("Last Remote Password", Tooltip = "The password for the last server connected to by IP.")]
     public string LastRemotePassword = "";
-    
+
     [Space(10)]
     [Header("Preferences")]
     [Draw("Show Name Tags", Tooltip = "Whether to show player names above their heads.")]
@@ -72,6 +73,8 @@ public class Settings : UnityModManager.ModSettings, IDrawable
     public bool ShowPingInNameTags;
     [Draw("Show Player List in Alt Mouse Mode", Tooltip = "Whether to show the player list in mouse mode.")]
     public bool ShowPlayerListInAltMouseMode = true;
+    [Draw("Player List Position", Tooltip = "Location to show the player list when it's visible.", VisibleOn = "ShowPlayerListInAltMouseMode|true")]
+    public PlayerListPosition PlayerListPosition = PlayerListPosition.TopCenter;
     [Draw("Chat Key Bind", Tooltip = "Key to show chat window.")]
     public KeyCode ChatKey = KeyCode.Return;
     [Draw("Hide Chat Messages", Tooltip = "Hide incoming chat messages.")]
@@ -108,10 +111,22 @@ public class Settings : UnityModManager.ModSettings, IDrawable
     [Draw("Maximum Latency (ms)", VisibleOn = "SimulateLatency|true")]
     public int SimulationMaxLatency = 100;
     public bool ForceJson = false;
+#if DEBUG
+    [Draw("Export Save Data On Load", VisibleOn = "ShowAdvancedSettings|true")]
+    public bool ExportSaveOnLoad = false;
+#endif
+
     public void Draw(UnityModManager.ModEntry modEntry)
     {
         Settings self = this;
+
+#if DEBUG
+        if (GUILayout.Button("Dump Save Json"))
+            ExportSaveData.DumpSaveData();
+#endif
+
         UnityModManager.UI.DrawFields(ref self, modEntry, DrawFieldMask.OnlyDrawAttr, OnChange);
+
         if (ShowAdvancedSettings && GUILayout.Button("Enable Developer Commands"))
             Console.RegisterDevCommands();
     }
@@ -169,12 +184,12 @@ public class Settings : UnityModManager.ModSettings, IDrawable
     {
         Settings data = Settings.Load<Settings>(modEntry);
 
-            MigrateSettings(ref data);
-            
-            data.SettingsVer = GetCurrentVersion();
+        MigrateSettings(ref data);
 
-            data.Save(modEntry);
- 
+        data.SettingsVer = GetCurrentVersion();
+
+        data.Save(modEntry);
+
         return data;
     }
 
@@ -205,7 +220,7 @@ public class Settings : UnityModManager.ModSettings, IDrawable
                 data.ShowAdvancedSettings = true;
                 data.DebugLogging = true;
                 data.ShowPingInNameTags = true;
-        
+
                 break;
 
             case 2:

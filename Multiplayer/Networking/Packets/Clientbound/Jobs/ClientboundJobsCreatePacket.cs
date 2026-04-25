@@ -7,7 +7,7 @@ namespace Multiplayer.Networking.Packets.Clientbound.Jobs;
 
 public class ClientboundJobsCreatePacket
 {
-    public ushort StationNetId { get; set; }
+    public uint StationNetId { get; set; }
     public JobData[] Jobs { get; set; }
 
     public static ClientboundJobsCreatePacket FromNetworkedJobs(NetworkedStationController netStation, NetworkedJob[] jobs)
@@ -15,7 +15,7 @@ public class ClientboundJobsCreatePacket
         List<JobData> jobData = [];
         foreach (var job in jobs)
         {
-            JobData jd = JobData.FromJob(netStation, job);
+            JobData jd = JobData.FromJob(job);
             jobData.Add(jd);
         }
 

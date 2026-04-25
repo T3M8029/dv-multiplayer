@@ -26,8 +26,12 @@ public readonly struct TrainsetSpawnPart
 
     // Customisation details
     public readonly bool PlayerSpawnedCar;
-    public readonly bool IsRestorationLoco;
+
+    public readonly RestorationType RestorationType;
     public readonly LocoRestorationController.RestorationState RestorationState;
+    public readonly ushort SecondCarNetId;
+    public readonly ushort[] TransportingCarNetIds;
+
     public readonly PaintTheme PaintExterior;
     public readonly PaintTheme PaintInterior;
 
@@ -49,7 +53,8 @@ public readonly struct TrainsetSpawnPart
 
     public TrainsetSpawnPart(
           ushort netId, string liveryId, string carId, string carGuid, bool exploded, TrainCarHealthData carHealthData,
-          bool playerSpawnedCar, bool isRestoration, LocoRestorationController.RestorationState restorationState, PaintTheme paintExterior, PaintTheme paintInterior,
+          bool playerSpawnedCar, RestorationType restorationType, LocoRestorationController.RestorationState restorationState, ushort secondCarNetId, ushort[] transportingCarNetIds,
+          PaintTheme paintExterior, PaintTheme paintInterior,
           CouplingData frontCoupling, CouplingData rearCoupling,
           float speed, Vector3 position, Quaternion rotation,
           BogieData bogie1, BogieData bogie2, BrakeSystemData brakeData)
@@ -62,8 +67,10 @@ public readonly struct TrainsetSpawnPart
         CarHealthData = carHealthData;
 
         PlayerSpawnedCar = playerSpawnedCar;
-        IsRestorationLoco = isRestoration;
+        RestorationType = restorationType;
         RestorationState = restorationState;
+        SecondCarNetId = secondCarNetId;
+        TransportingCarNetIds = transportingCarNetIds;
 
         PaintExterior = paintExterior;
         PaintInterior = paintInterior;
@@ -86,7 +93,9 @@ public readonly struct TrainsetSpawnPart
         writer.Put(data.CarId);
 
         if (Guid.TryParse(data.CarGuid, out Guid guid))
+        {
             writer.PutBytesWithLength(guid.ToByteArray());
+        }
         else
         {
             Multiplayer.LogError($"TrainsetSpawnPart.Serialize() failed to parse carGuid: {data.CarGuid}");
@@ -97,10 +106,19 @@ public readonly struct TrainsetSpawnPart
         TrainCarHealthData.Serialize(writer, data.CarHealthData);
 
         writer.Put(data.PlayerSpawnedCar);
-        writer.Put(data.IsRestorationLoco);
+        writer.Put((byte)data.RestorationType);
 
-        if(data.IsRestorationLoco)
-            writer.Put((byte) data.RestorationState);
+        Multiplayer.LogDebug(() => $"Serializing TrainsetSpawnPart with RestorationType: {data.RestorationType}, RestorationState: {data.RestorationState}, SecondCarNetId: {data.SecondCarNetId}");
+
+        if (data.RestorationType != RestorationType.None)
+        {
+            writer.Put((byte)data.RestorationState);
+
+            if (data.RestorationType == RestorationType.Double)
+                writer.Put(data.SecondCarNetId);
+
+            writer.PutArray(data.TransportingCarNetIds);
+        }
 
         PaintThemeLookup.Instance.TryGetNetId(data.PaintExterior, out var extPaintNetId);
         writer.Put(extPaintNetId);
@@ -131,10 +149,25 @@ public readonly struct TrainsetSpawnPart
         TrainCarHealthData healthData = TrainCarHealthData.Deserialize(reader);
 
         bool playerSpawnedCar = reader.GetBool();
-        bool isRestoration = reader.GetBool();
+        RestorationType restorationType = (RestorationType)reader.GetByte();
+
         LocoRestorationController.RestorationState restorationState = default;
-        if (isRestoration)
+        ushort secondCarNetId = 0;
+        ushort[] transportationCarNetIds = null;
+
+        Multiplayer.LogDebug(() => $"Deserializing TrainsetSpawnPart for [{carId}, {netId}] with RestorationType: {restorationType}");
+
+        if (restorationType != RestorationType.None)
+        {
             restorationState = (LocoRestorationController.RestorationState)reader.GetByte();
+
+            if (restorationType == RestorationType.Double)
+                secondCarNetId = reader.GetUShort();
+
+            transportationCarNetIds = reader.GetUShortArray();
+
+            Multiplayer.LogDebug(() => $"Deserializing TrainsetSpawnPart for [{carId}, {netId}] with RestorationType: {restorationType}, RestorationState: {restorationState}, SecondCarNetId: {secondCarNetId}");
+        }
 
         uint extThemeId = reader.GetUInt();
         uint intThemeId = reader.GetUInt();
@@ -156,7 +189,9 @@ public readonly struct TrainsetSpawnPart
 
         return new TrainsetSpawnPart(
             netId, liveryId, carId, carGuid, exploded, healthData,
-            playerSpawnedCar, isRestoration, restorationState, exteriorPaint, interiorPaint,
+            playerSpawnedCar,
+            restorationType, restorationState, secondCarNetId, transportationCarNetIds,
+            exteriorPaint, interiorPaint,
             frontCoupling, rearCoupling,
             speed, position, rotation,
             bogie1, bogie2, brakeSet);
@@ -167,34 +202,56 @@ public readonly struct TrainsetSpawnPart
         TrainCar trainCar = networkedTrainCar.TrainCar;
         Transform transform = networkedTrainCar.transform;
 
+        RestorationType restorationType = RestorationType.None;
+        LocoRestorationController.RestorationState restorationState = default;
+        ushort secondCarNetId = 0;
+        ushort[] transportingCarNetIds = null;
 
         LocoRestorationController restorationController = LocoRestorationController.GetForTrainCar(trainCar);
-        var restorationState = restorationController?.State ?? default;
+        if (restorationController != null)
+        {
+            restorationState = restorationController?.State ?? default;
+            secondCarNetId = restorationController?.secondCar.GetNetId() ?? default;
+
+            if (secondCarNetId == 0)
+                restorationType = RestorationType.Single;
+            else
+                restorationType = RestorationType.Double;
+
+            if (restorationController.transportingCars != null && restorationController.transportingCars.Count > 0)
+            {
+                transportingCarNetIds = new ushort[restorationController.transportingCars.Count];
+                for (int i = 0; i < restorationController.transportingCars.Count; i++)
+                    transportingCarNetIds[i] = restorationController.transportingCars[i].GetNetId();
+            }
+        }
 
         return new TrainsetSpawnPart(
-            networkedTrainCar.NetId,
-            trainCar.carLivery.id,
-            trainCar.ID,
-            trainCar.CarGUID,
-            trainCar.isExploded,
-            TrainCarHealthData.From(trainCar),
+                networkedTrainCar.NetId,
+                trainCar.carLivery.id,
+                trainCar.ID,
+                trainCar.CarGUID,
+                trainCar.isExploded,
+                TrainCarHealthData.From(trainCar),
 
-            trainCar.playerSpawnedCar,
-            restorationController != null,
-            restorationState,
-            
-            trainCar?.PaintExterior?.currentTheme,
-            trainCar?.PaintInterior?.currentTheme,
+                trainCar.playerSpawnedCar,
+                restorationType,
+                restorationState,
+                secondCarNetId,
+                transportingCarNetIds,
 
-            frontCoupling: CouplingData.From(trainCar.frontCoupler),
-            rearCoupling: CouplingData.From(trainCar.rearCoupler),
-            trainCar.GetForwardSpeed(),
-            transform.position - WorldMover.currentMove,
-            transform.rotation,
-            BogieData.FromBogie(trainCar.Bogies[0]),
-            BogieData.FromBogie(trainCar.Bogies[1]),
-            BrakeSystemData.From(trainCar.brakeSystem)
-        );
+                trainCar?.PaintExterior?.currentTheme,
+                trainCar?.PaintInterior?.currentTheme,
+
+                frontCoupling: CouplingData.From(trainCar.frontCoupler),
+                rearCoupling: CouplingData.From(trainCar.rearCoupler),
+                trainCar.GetForwardSpeed(),
+                transform.position - WorldMover.currentMove,
+                transform.rotation,
+                BogieData.FromBogie(trainCar.Bogies[0]),
+                BogieData.FromBogie(trainCar.Bogies[1]),
+                BrakeSystemData.From(trainCar.brakeSystem)
+            );
     }
 
     public static TrainsetSpawnPart[] FromTrainSet(List<TrainCar> trainset/*, bool resolveCoupling = false*/)

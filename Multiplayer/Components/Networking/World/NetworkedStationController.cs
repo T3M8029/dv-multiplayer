@@ -15,7 +15,7 @@ using UnityEngine;
 
 namespace Multiplayer.Components.Networking.World;
 
-public class NetworkedStationController : IdMonoBehaviour<ushort, NetworkedStationController>
+public class NetworkedStationController : IdMonoBehaviour<uint, NetworkedStationController>
 {
     #region Lookup Cache
     private static readonly Dictionary<StationController, NetworkedStationController> stationControllerToNetworkedStationController = [];
@@ -25,15 +25,14 @@ public class NetworkedStationController : IdMonoBehaviour<ushort, NetworkedStati
     private static readonly Dictionary<JobValidator, NetworkedStationController> jobValidatorToNetworkedStation = [];
     private static readonly List<JobValidator> jobValidators = [];
 
-    public static bool Get(ushort netId, out NetworkedStationController obj)
+    public static bool Get(uint netId, out NetworkedStationController obj)
     {
-        bool b = Get(netId, out IdMonoBehaviour<ushort, NetworkedStationController> rawObj);
+        bool b = Get(netId, out IdMonoBehaviour<uint, NetworkedStationController> rawObj);
         obj = (NetworkedStationController)rawObj;
         return b;
     }
 
-
-    public static bool TryGet(ushort netId, out StationController stationController)
+    public static bool TryGet(uint netId, out StationController stationController)
     {
         if (Get(netId, out var networkedStationController))
         {
@@ -45,7 +44,7 @@ public class NetworkedStationController : IdMonoBehaviour<ushort, NetworkedStati
         return false;
     }
 
-    public static bool TryGet(ushort netId, out Station station)
+    public static bool TryGet(uint netId, out Station station)
     {
         if (Get(netId, out var networkedStationController))
         {
@@ -57,7 +56,7 @@ public class NetworkedStationController : IdMonoBehaviour<ushort, NetworkedStati
         return false;
     }
 
-    public static bool TryGet(ushort netId, out JobValidator jobValidator)
+    public static bool TryGet(uint netId, out JobValidator jobValidator)
     {
         if (Get(netId, out var networkedStationController))
         {
@@ -69,7 +68,7 @@ public class NetworkedStationController : IdMonoBehaviour<ushort, NetworkedStati
         return false;
     }
 
-    public static bool TryGetNetId(StationController stationController, out ushort netId)
+    public static bool TryGetNetId(StationController stationController, out uint netId)
     {
         if (GetFromStationController(stationController, out var networkedStationController))
         {
@@ -81,7 +80,7 @@ public class NetworkedStationController : IdMonoBehaviour<ushort, NetworkedStati
         return false;
     }
 
-    public static bool TryGetNetId(Station station, out ushort netId)
+    public static bool TryGetNetId(Station station, out uint netId)
     {
         if (GetFromStation(station, out var networkedStationController))
         {
@@ -93,7 +92,7 @@ public class NetworkedStationController : IdMonoBehaviour<ushort, NetworkedStati
         return false;
     }
 
-    public static bool TryGetNetId(JobValidator jobValidator, out ushort netId)
+    public static bool TryGetNetId(JobValidator jobValidator, out uint netId)
     {
         if (GetFromJobValidator(jobValidator, out var networkedStationController))
         {
@@ -105,24 +104,13 @@ public class NetworkedStationController : IdMonoBehaviour<ushort, NetworkedStati
         return false;
     }
 
-    public static Dictionary<ushort, string> GetAll()
-    {
-        Dictionary<ushort, string> result = [];
-
-        foreach (var kvp in stationIdToNetworkedStationController)
-        {
-            //Multiplayer.Log($"GetAll() adding {kvp.Value.NetId}, {kvp.Key}");
-            result.Add(kvp.Value.NetId, kvp.Key);
-        }
-        return result;
-    }
-
-    public static bool GetStationController(ushort netId, out StationController obj)
+    public static bool GetStationController(uint netId, out StationController obj)
     {
         bool b = Get(netId, out NetworkedStationController networkedStationController);
         obj = b ? networkedStationController.StationController : null;
         return b;
     }
+
     public static bool GetFromStationId(string stationId, out NetworkedStationController networkedStationController)
     {
         return stationIdToNetworkedStationController.TryGetValue(stationId, out networkedStationController);
@@ -156,6 +144,7 @@ public class NetworkedStationController : IdMonoBehaviour<ushort, NetworkedStati
     public static void RegisterStationController(NetworkedStationController networkedStationController, StationController stationController)
     {
         string stationID = stationController.logicStation.ID;
+        networkedStationController.NetId = StringHashing.Fnv1aHash(stationID);
 
         stationControllerToNetworkedStationController.Add(stationController, networkedStationController);
         stationIdToNetworkedStationController.Add(stationID, networkedStationController);
@@ -180,7 +169,7 @@ public class NetworkedStationController : IdMonoBehaviour<ushort, NetworkedStati
 
     const int MAX_FRAMES = 120;
 
-    protected override bool IsIdServerAuthoritative => true;
+    protected override bool IsIdServerAuthoritative => false;
 
     public StationController StationController;
 
@@ -548,12 +537,9 @@ public class NetworkedStationController : IdMonoBehaviour<ushort, NetworkedStati
                 break;
 
             case JobState.Expired:
-                //if (availableJobs.Contains(netJob.Job))
-                //    availableJobs.Remove(netJob.Job);
-
                 netJob.Job.ExpireJob();
                 netJob.DestroyJobOverview();
-                //StationController.ClearAvailableJobOverviewGOs();   //todo: better logic when players can hold items
+
                 StartCoroutine(UpdateCarPlates(netJob.JobCars, string.Empty));
                 break;
 

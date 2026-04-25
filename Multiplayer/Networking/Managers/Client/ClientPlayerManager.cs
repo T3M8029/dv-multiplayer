@@ -30,6 +30,12 @@ public class ClientPlayerManager
 
     public void AddPlayer(byte playerId, string username, string crewName)
     {
+        if (playerMap.ContainsKey(playerId))
+        {
+            Multiplayer.LogWarning($"Player with id {playerId} already exists. Removing existing player {playerMap[playerId].Username}");
+            RemovePlayer(playerId);
+        }
+
         GameObject go = Object.Instantiate(playerPrefab, WorldMover.OriginShiftParent);
         go.layer = LayerMask.NameToLayer(Layers.Player);
         NetworkedPlayer networkedPlayer = go.AddComponent<NetworkedPlayer>();

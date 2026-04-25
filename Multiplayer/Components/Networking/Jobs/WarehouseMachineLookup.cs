@@ -27,7 +27,7 @@ public class WarehouseMachineLookup : SingletonBehaviour<WarehouseMachineLookup>
         if (netIdToWarehouseMachine.ContainsKey(netId))
         {
             var existing = netIdToWarehouseMachine[netId];
-            Multiplayer.LogWarning(() => $"Registering WarehouseMachine for track {machine.WarehouseTrack.ID}, machineID: {machine.ID} failed! More than one WarehouseMachine with the same ID!");
+            Multiplayer.LogWarning($"Registering WarehouseMachine for track {machine.WarehouseTrack.ID}, machineID: {machine.ID} failed! More than one WarehouseMachine with the same ID!");
             return;
         }
 

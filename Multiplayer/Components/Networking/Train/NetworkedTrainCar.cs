@@ -18,6 +18,7 @@ using Multiplayer.Networking.Data.Train;
 using Multiplayer.Networking.Packets.Clientbound.Train;
 using Multiplayer.Networking.Packets.Common.Train;
 using Multiplayer.Utils;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -98,13 +99,13 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
     }
 
     #endregion
-
     private const int MAX_COUPLER_ITERATIONS = 10;
     private const float MAX_PORT_DELTA = 0.001f;
     private const uint MIN_KINEMATIC_CYCLES = 10;
     private const float DISTANCE_TOLERANCE = 2f;
     private const float MAX_PAINT_DISTANCE_SQ = (CommsRadioPaintjob.SIGNAL_RANGE + DISTANCE_TOLERANCE) * (CommsRadioPaintjob.SIGNAL_RANGE + DISTANCE_TOLERANCE);
     private const float POSITION_UPDATE_THRESHOLD = 0.1f; // TrainCar must have a bigger delta to apply position update
+    private const float INTERIOR_CONTROLS_TIMEOUT = 2f;
 
     #region Port and Fuse Map
 
@@ -177,6 +178,12 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
     private HashSet<uint> dirtyFuses;
     private readonly HashSet<TrainCarPaint> dirtyPaints = [];
     private readonly Dictionary<string, float> lastSentTrainDamages = [];
+
+    private InteriorControlsManager interiorControlsManager;
+    private readonly Dictionary<ControlImplBase, Action<ValueChangedEventArgs>> scrollableControlDelegates = [];
+    private Dictionary<InteriorControlsManager.ControlType, OverridableBaseControl> controlTypeToControl = [];
+    private readonly Dictionary<uint, OverridableBaseControl> portToBaseControl = [];
+    private readonly Dictionary<IScrollable, Coroutine> scrollingControls = [];
 
     private bool handbrakeDirty;
     private bool mainResPressureDirty;
@@ -257,24 +264,37 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
     }
 
     [UsedImplicitly]
-    public void Start()
+    protected void Start()
     {
-        brakeSystem = TrainCar.brakeSystem;
+        float time = Time.time;
+
+        if (TrainCar == null)
+        {
+            Multiplayer.LogError($"NetworkedTrainCar.Start() TrainCar is null on {gameObject?.name} after {(Time.time - time):F2}s");
+            return;
+        }
 
         Multiplayer.LogDebug(() => $"NetworkedTrainCar.Start({TrainCar?.ID}, {NetId})");
 
-        foreach (Coupler coupler in TrainCar.couplers)
+        if (TrainCar.couplers == null || TrainCar.couplers.Length == 0)
         {
-            hoseToCoupler[coupler.hoseAndCock] = coupler;
-
-            //Multiplayer.LogDebug(() => $"TrainCar.Start() [{TrainCar?.ID}, {NetId}], Coupler exists: {coupler != null}, Is front: {coupler.isFrontCoupler}, ChainScript exists: {coupler.ChainScript != null}");
-
-            //Locos with tenders and tenders only have one chainscript each, no trainscript is used for the hitch between the loco and tender
-            if (coupler.ChainScript != null)
-                coupler.ChainScript.StateChanged += (state) => { Client_CouplerStateChange(state, coupler); };
+            Multiplayer.LogWarning($"NetworkedTrainCar.Start() Couplers are null or empty on {CurrentID}");
         }
+        else
+        {
+            foreach (Coupler coupler in TrainCar.couplers)
+            {
+                hoseToCoupler[coupler.hoseAndCock] = coupler;
 
-        Multiplayer.LogDebug(() => $"NetworkedTrainCar.Start({CurrentID}, {NetId}) Couplers complete");
+                //Multiplayer.LogDebug(() => $"TrainCar.Start() [{TrainCar?.ID}, {NetId}], Coupler exists: {coupler != null}, Is front: {coupler.isFrontCoupler}, ChainScript exists: {coupler.ChainScript != null}");
+
+                //Locos with tenders and tenders only have one chainscript each, no trainscript is used for the hitch between the loco and tender
+                if (coupler.ChainScript != null)
+                    coupler.ChainScript.StateChanged += (state) => { Client_CouplerStateChange(state, coupler); };
+            }
+
+            Multiplayer.LogDebug(() => $"NetworkedTrainCar.Start({CurrentID}, {NetId}) Couplers complete");
+        }
 
         simController = GetComponent<SimController>();
         if (simController != null)
@@ -282,29 +302,74 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
             hasSimFlow = true;
             simulationFlow = simController.SimulationFlow;
 
+            // Find all train controls
+            if (simController.controlsOverrider == null)
+            {
+                Multiplayer.LogWarning($"NetworkedTrainCar.Start() ControlsOverrider is null on car {CurrentID}");
+            }
+            else
+            {
+                controlTypeToControl = simController.controlsOverrider.controlsMap;
+                foreach (var kvp in controlTypeToControl)
+                {
+                    var control = kvp.Value;
+                    if (control == null)
+                    {
+                        Multiplayer.LogWarning($"NetworkedTrainCar.Start() Control {kvp.Key} is null on car {CurrentID}");
+                        continue;
+                    }
+
+                    if (string.IsNullOrEmpty(control.portId))
+                    {
+                        Multiplayer.LogWarning($"NetworkedTrainCar.Start() Control {kvp.Key} has no portId on car {CurrentID}");
+                        continue;
+                    }
+
+                    var portNetId = GetPortNetId(control.portId);
+                    portToBaseControl[portNetId] = control;
+
+                    Multiplayer.LogDebug(() => $"NetworkedTrainCar.Start() Control {kvp.Key} has portId {control.portId} on car {CurrentID}");
+                }
+            }
+
             TrainCar.InteriorLoaded += OnTrainCarInteriorLoaded;
             TrainCar.InteriorAboutToBeUnloaded += OnTrainCarInteriorUnloaded;
 
             if (TrainCar.loadedInterior != null)
                 OnTrainCarInteriorLoaded(TrainCar.loadedInterior.gameObject);
 
-            dirtyPorts = new HashSet<uint>(simulationFlow.fullPortIdToPort.Count);
-            lastSentPortValues = new Dictionary<uint, float>(dirtyPorts.Count);
-            foreach (KeyValuePair<string, Port> kvp in simulationFlow.fullPortIdToPort)
+            if (simulationFlow != null)
             {
-                _ = GetPortNetId(kvp.Key); //ensure this port is registered
-                if (kvp.Value.valueType == PortValueType.CONTROL || NetworkLifecycle.Instance.IsHost())
+                dirtyPorts = new HashSet<uint>(simulationFlow.fullPortIdToPort.Count);
+                lastSentPortValues = new Dictionary<uint, float>(dirtyPorts.Count);
+                foreach (KeyValuePair<string, Port> kvp in simulationFlow.fullPortIdToPort)
                 {
-                    Multiplayer.LogDebug(() => $"NetworkedTrainCar.Start({CurrentID}, {NetId}) Subscribing to port {kvp.Key}");
-                    kvp.Value.ValueUpdatedInternally += _ => { Common_OnPortUpdated(kvp.Value); };
+                    var portNetId = GetPortNetId(kvp.Key);
+                    if (kvp.Value.valueType == PortValueType.CONTROL || NetworkLifecycle.Instance.IsHost())
+                    {
+                        if (portToBaseControl.TryGetValue(portNetId, out var control))
+                        {
+                            Multiplayer.LogDebug(() => $"NetworkedTrainCar.Start({CurrentID}, {NetId}) Subscribing to control {control.ControlType} for {kvp.Key} with netId {portNetId}");
+                            control.ControlUpdated += _ => { Common_OnPortUpdated(kvp.Value, portNetId); };
+                        }
+                        else
+                        {
+                            Multiplayer.LogDebug(() => $"NetworkedTrainCar.Start({CurrentID}, {NetId}) Subscribing to port {kvp.Key}");
+                            kvp.Value.ValueUpdatedInternally += _ => { Common_OnPortUpdated(kvp.Value, portNetId); };
+                        }
+                    }
+                }
+
+                dirtyFuses = new HashSet<uint>(simulationFlow.fullFuseIdToFuse.Count);
+                foreach (KeyValuePair<string, Fuse> kvp in simulationFlow.fullFuseIdToFuse)
+                {
+                    var fuseNetId = GetFuseNetId(kvp.Key);
+                    kvp.Value.StateUpdated += _ => { Common_OnFuseUpdated(fuseNetId); };
                 }
             }
-
-            dirtyFuses = new HashSet<uint>(simulationFlow.fullFuseIdToFuse.Count);
-            foreach (KeyValuePair<string, Fuse> kvp in simulationFlow.fullFuseIdToFuse)
+            else
             {
-                _ = GetFuseNetId(kvp.Key); //ensure this fuse is registered
-                kvp.Value.StateUpdated += _ => { Common_OnFuseUpdated(kvp.Value); };
+                Multiplayer.LogWarning($"NetworkedTrainCar.Start() SimulationFlow is null on {CurrentID}");
             }
 
             firebox = simController.firebox;
@@ -323,10 +388,18 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
             }
         }
 
-        //Multiplayer.LogDebug(() => $"NetworkedTrainCar.Start({TrainCar?.ID}, {NetId}) SimController complete");
+        Multiplayer.LogDebug(() => $"NetworkedTrainCar.Start({TrainCar?.ID}, {NetId}) SimController complete");
 
-        brakeSystem.HandbrakePositionChanged += Common_OnHandbrakePositionChanged;
-        brakeSystem.BrakeCylinderReleased += Common_OnBrakeCylinderReleased;
+        if (TrainCar.brakeSystem != null)
+        {
+            brakeSystem = TrainCar.brakeSystem;
+            brakeSystem.HandbrakePositionChanged += Common_OnHandbrakePositionChanged;
+            brakeSystem.BrakeCylinderReleased += Common_OnBrakeCylinderReleased;
+        }
+        else
+        {
+            Multiplayer.LogError($"NetworkedTrainCar.Start() BrakeSystem is null on {CurrentID}");
+        }
 
         if (TrainCar.PaintExterior != null)
             TrainCar.PaintExterior.OnThemeChanged += Common_OnPaintThemeChange;
@@ -378,8 +451,11 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
                 }
             }
 
-            brakeSystem.MainResPressureChanged += Server_MainResUpdate;
-            brakeSystem.heatController.OverheatingActiveStateChanged += Server_BrakeHeatUpdate;
+            if (brakeSystem != null)
+            {
+                brakeSystem.MainResPressureChanged += Server_MainResUpdate;
+                brakeSystem.heatController.OverheatingActiveStateChanged += Server_BrakeHeatUpdate;
+            }
 
             StartCoroutine(Server_WaitForLogicCar());
         }
@@ -397,13 +473,13 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
     private IEnumerator WaitForInterior()
     {
         float time = Time.time;
-        InteriorControlsManager interiorControlsManager = null;
+        interiorControlsManager = null;
 
         yield return new WaitUntil
         (
             () =>
             {
-                return TrainCar?.loadedInterior != null || Time.time - time > 2000f;
+                return TrainCar?.loadedInterior != null || Time.time - time > INTERIOR_CONTROLS_TIMEOUT;
             }
         );
 
@@ -421,59 +497,83 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
         (
             () =>
             {
-                return TrainCar.loadedInterior.TryGetComponent<InteriorControlsManager>(out interiorControlsManager) || Time.time - time > 2000f;
+                return TrainCar.loadedInterior.TryGetComponent<InteriorControlsManager>(out interiorControlsManager) || Time.time - time > INTERIOR_CONTROLS_TIMEOUT;
             }
         );
 
-        yield return new WaitForFixedUpdate();
-
-        if (!interiorControlsManager.Initialized)
-        {
-            interiorControlsManager.OnInitialized += HookControls;
-            yield break;
-        }
-
-        yield return new WaitForSecondsRealtime(2f);
-
-        HookControls(interiorControlsManager);
+        CoroutineManager.Instance.StartCoroutine(HookControls(interiorControlsManager));
     }
 
-    private void HookControls(InteriorControlsManager interiorControlsManager)
+    private IEnumerator HookControls(InteriorControlsManager interiorControlsManager)
     {
-        interiorControlsManager.OnInitialized -= HookControls;
+        yield return new WaitUntil(() => interiorControlsManager.Initialized);
+
+        Multiplayer.LogDebug(() => $"HookControls() Hooking controls for car {CurrentID}, found {interiorControlsManager?.controls?.Count} controls");
 
         // Find all control overrides
-        foreach (var control in interiorControlsManager.controls.Values)
+        foreach (var kvp in interiorControlsManager.controls)
         {
+            var control = kvp.Value;
+            var key = kvp.Key;
+
+            float timeOut = Time.time;
+            yield return new WaitUntil
+            (
+                () =>
+                    (control.controlImplBase != null && !string.IsNullOrEmpty(control.overridableBaseControl?.portId)) ||
+                    Time.time - timeOut > INTERIOR_CONTROLS_TIMEOUT
+            );
+
             var controlPortId = control.overridableBaseControl?.portId;
 
             if (string.IsNullOrEmpty(controlPortId))
             {
-                Multiplayer.LogDebug(() => $"HookControls() Control, {NetId}] has no controlPortId on car {CurrentID}");
+                Multiplayer.LogWarning($"Unable to hook control {control.overridableBaseControl?.name ?? control.controlImplBase?.spec?.name} ({key}), has no controlPortId on car [{CurrentID}, {NetId}]");
                 continue;
             }
 
             Multiplayer.LogDebug(() => $"HookControls() Control [{controlPortId}] found on car {CurrentID}");
             var netId = GetPortNetId(controlPortId);
 
-
             if (control.controlImplBase == null)
             {
-                Multiplayer.LogDebug(() => $"HookControls() Control [{controlPortId}, {netId}] has no implementation on car {CurrentID}");
+                Multiplayer.LogWarning($"Unable to hook control [{controlPortId}, {netId}], no control implementation on car {CurrentID}");
                 continue;
             }
 
-            Multiplayer.LogDebug(() => $"HookControls() Control [{controlPortId}, {netId}] hooking events on car {CurrentID}, hash: {control.controlImplBase.GetHashCode()}, instance: {control.controlImplBase.GetInstanceID()}");
+            // Check for ObiRopeGrabHandler used by steam whistles
+            ObiRopeGrabAreaHandler ObiGrabHandler = control.controlImplBase?.transform?.parent?.GetComponentInChildren<ObiRopeGrabAreaHandler>(false);
+            if (ObiGrabHandler != null)
+            {
+                // Handle grab/ungrab events
+                ObiGrabHandler.Grabbed += Client_ControlGrabbed;
+                ObiGrabHandler.Ungrabbed += Client_ControlUngrabbed;
 
-            portNetIdToControl[netId] = control.controlImplBase;
-            controlToPortNetId[control.controlImplBase] = netId;
+                portNetIdToControl[netId] = ObiGrabHandler;
+                controlToPortNetId[ObiGrabHandler] = netId;
+            }
+            else
+            {
+                // Standard control grab/ungrab events
+                control.controlImplBase.Grabbed += Client_ControlGrabbed;
+                control.controlImplBase.Ungrabbed += Client_ControlUngrabbed;
 
-            control.controlImplBase.Grabbed += Client_ControlGrabbed;
-            control.controlImplBase.Ungrabbed += Client_ControlUngrabbed;
+                portNetIdToControl[netId] = control.controlImplBase;
+                controlToPortNetId[control.controlImplBase] = netId;
+            }
+
+            // Handle scroll events for scrollable controls
+            if (control.scrollable != null)
+            {
+                void ScrollChanged(ValueChangedEventArgs args) => Client_ControlScrolled(control);
+                scrollableControlDelegates[control.controlImplBase] = ScrollChanged;
+                control.controlImplBase.ValueChanged += ScrollChanged;
+            }
 
             if (portNetIdToBlockState.TryGetValue(netId, out var isBlocked) && isBlocked)
             {
                 Multiplayer.LogDebug(() => $"WaitForInterior() Control [{controlPortId}, {netId}] is blocked on car {CurrentID}");
+                Client_ReceiveAuthorityUpdate(netId, ControlAuthorityState.Blocked);
             }
         }
     }
@@ -487,14 +587,33 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
             if (control == null)
                 continue;
 
+            if (control.IsGrabbed())
+                Client_ControlUngrabbed(control);
+
             control.Grabbed -= Client_ControlGrabbed;
             control.Ungrabbed -= Client_ControlUngrabbed;
         }
 
+        foreach (var kvp in scrollingControls)
+        {
+            if (kvp.Key == null)
+                continue;
+
+            StopCoroutine(kvp.Value);
+        }
+        scrollingControls.Clear();
+
+        foreach (var kvp in scrollableControlDelegates)
+        {
+            if (kvp.Key != null && kvp.Value != null)
+                kvp.Key.ValueChanged -= kvp.Value;
+        }
+
         portNetIdToControl.Clear();
         controlToPortNetId.Clear();
-    }
 
+        interiorControlsManager = null;
+    }
 
     public void OnDisable()
     {
@@ -1121,7 +1240,7 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
             else
                 NetworkLifecycle.Instance.Client.SendPaintThemeChange(this, paintController.targetArea, themeNetId);
         }
-        
+
         dirtyPaints.Clear();
     }
 
@@ -1139,9 +1258,9 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
         NetworkLifecycle.Instance.Client.SendBrakeCylinderReleased(NetId);
     }
 
-    private void Common_OnPortUpdated(Port port)
+    private void Common_OnPortUpdated(Port port, uint portNetId)
     {
-
+        //Multiplayer.LogDebug(() => $"Common_OnPortUpdated() port [{port?.id}] updated on [{CurrentID}, {NetId}]. Value: {port?.Value}, PrevValue: {port?.prevValue}, ValueType: {port?.valueType}, Tick: {NetworkLifecycle.Instance.Tick}");
         if (port.valueType != PortValueType.CONTROL && !NetworkLifecycle.Instance.IsHost())
         {
             Multiplayer.LogDebug(() => $"Common_OnPortUpdated() Ignoring non-control port update for [{port.id}] on [{CurrentID}, {NetId}]");
@@ -1153,27 +1272,31 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
         if (float.IsNaN(port.prevValue) && float.IsNaN(port.Value))
             return;
 
-        var netId = GetPortNetId(port.id);
-        bool hasLastSent = lastSentPortValues.TryGetValue(netId, out float lastSentValue);
+        bool hasLastSent = lastSentPortValues.TryGetValue(portNetId, out float lastSentValue);
         float delta = Mathf.Abs(lastSentValue - port.Value);
 
         if (port.valueType == PortValueType.STATE)
         {
             if (!hasLastSent || lastSentValue != port.Value)
             {
-                dirtyPorts.Add(netId);
+                dirtyPorts.Add(portNetId);
             }
         }
         else
         {
             if (!hasLastSent || delta > MAX_PORT_DELTA || (port.Value == 0 && lastSentValue != 0))
             {
-                dirtyPorts.Add(netId);
+                dirtyPorts.Add(portNetId);
             }
 
             if (port.valueType == PortValueType.CONTROL)
             {
-                dirtyPorts.Add(netId);
+                if (portNetIdToBlockState.TryGetValue(portNetId, out var isBlocked) && isBlocked)
+                {
+                    Multiplayer.LogDebug(() => $"Common_OnPortUpdated() Control port [{port.id}, {portNetId}] is currently blocked on [{CurrentID}, {NetId}]");
+                    return;
+                }
+                dirtyPorts.Add(portNetId);
             }
         }
     }
@@ -1189,13 +1312,12 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
         dirtyPaints.Add(paintController);
     }
 
-    private void Common_OnFuseUpdated(Fuse fuse)
+    private void Common_OnFuseUpdated(uint fuseNetId)
     {
         if (UnloadWatcher.isUnloading || NetworkLifecycle.Instance.IsProcessingPacket)
             return;
 
-        var netId = GetFuseNetId(fuse.id);
-        dirtyFuses.Add(netId);
+        dirtyFuses.Add(fuseNetId);
     }
 
     public void Common_UpdatePorts(CommonTrainPortsPacket packet)
@@ -1337,7 +1459,7 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
             if (coupler.ChainScript.state != ChainCouplerInteraction.State.Attached_Tight)
                 StartCoroutine(ParkCoupler(coupler));
             else
-                Multiplayer.LogWarning(() => $"Received Park interaction for [{TrainCar?.ID}, {NetId}], coupler is front: {packet.IsFrontCoupler}, but coupler is in the wrong state: {coupler.state}, Chain state:{coupler.ChainScript.state}, isCoupled: {coupler.IsCoupled()}");
+                Multiplayer.LogWarning($"Received Park interaction for [{TrainCar?.ID}, {NetId}], coupler is front: {packet.IsFrontCoupler}, but coupler is in the wrong state: {coupler.state}, Chain state:{coupler.ChainScript.state}, isCoupled: {coupler.IsCoupled()}");
 
             Multiplayer.LogDebug(() => $"4 Common_ReceiveCouplerInteraction() [{TrainCar?.ID}, {NetId}], coupler is front: {packet.IsFrontCoupler}, flags: {flags} restorestate: {coupler.state}, current state: {coupler.state}, Chain state:{coupler.ChainScript.state}, isCoupled: {coupler.IsCoupled()}");
         }
@@ -1349,7 +1471,7 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
             if (coupler.ChainScript.state != ChainCouplerInteraction.State.Attached_Tight)
                 StartCoroutine(DangleCoupler(coupler));
             else
-                Multiplayer.LogWarning(() => $"Received Dangle interaction for [{TrainCar?.ID}, {NetId}], coupler is front: {packet.IsFrontCoupler}, but coupler is in the wrong state: {coupler.state}, Chain state:{coupler.ChainScript.state}, isCoupled: {coupler.IsCoupled()}");
+                Multiplayer.LogWarning($"Received Dangle interaction for [{TrainCar?.ID}, {NetId}], coupler is front: {packet.IsFrontCoupler}, but coupler is in the wrong state: {coupler.state}, Chain state:{coupler.ChainScript.state}, isCoupled: {coupler.IsCoupled()}");
         }
 
         if (flags.HasFlag(CouplerInteractionType.CouplerLoosen))
@@ -1853,6 +1975,32 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
         }
     }
 
+    private void Client_ControlScrolled(InteriorControlsManager.ControlReference controlRef)
+    {
+        if (controlRef.controlImplBase.IsHoverScrolled())
+        {
+            // Currently scrolling
+            Multiplayer.LogDebug(() => $"Client_ControlScrolled() Control {controlRef.overridableBaseControl.ControlType} on car {CurrentID} was scrolled while hovered, requesting authority");
+
+            if (!scrollingControls.ContainsKey(controlRef.scrollable))
+            {
+                scrollingControls[controlRef.scrollable] = StartCoroutine(Client_CheckScrolling(controlRef));
+                Client_ControlGrabbed(controlRef.controlImplBase);
+            }
+        }
+    }
+
+    private IEnumerator Client_CheckScrolling(InteriorControlsManager.ControlReference controlRef)
+    {
+        // Wait for player to stop scrolling
+        while (controlRef.controlImplBase.IsHoverScrolled())
+            yield return new WaitForSecondsRealtime(0.5f);
+
+        Multiplayer.LogDebug(() => $"Client_CheckScrolling() Control {controlRef.overridableBaseControl.ControlType} on car {CurrentID} scrolling complete");
+        scrollingControls.Remove(controlRef.scrollable);
+        Client_ControlUngrabbed(controlRef.controlImplBase);
+    }
+
     private void Client_ControlUngrabbed(ControlImplBase control)
     {
         Multiplayer.LogDebug(() => $"Client_ControlUngrabbed() Control {control.name}, car: {CurrentID}");
@@ -1867,7 +2015,35 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
 
         if (portNetIdToBlockState.TryGetValue(portNetId, out var isBlocked) && !isBlocked)
         {
+            var hinge = control.GetComponent<HingeJoint>();
+            var cj = control.GetComponent<ConfigurableJoint>();
+            if (hinge != null && hinge.useSpring || cj != null)
+            {
+                StartCoroutine(WaitForControlToSettle(control, portNetId));
+                return;
+            }
             Multiplayer.LogDebug(() => $"Client_ControlUngrabbed() Control [{control.name}, {portNetId}] not blocked, releasing authority for car {CurrentID}");
+            NetworkLifecycle.Instance.Client?.SendTrainControlAuthorityRequest(NetId, portNetId, false);
+        }
+    }
+
+    private IEnumerator WaitForControlToSettle(ControlImplBase control, uint portNetId)
+    {
+        var time = Time.time;
+
+        var oldValue = float.MaxValue;
+
+        try
+        {
+            while (!Mathf.Approximately(control.Value, oldValue))
+            {
+                oldValue = control.Value;
+                yield return new WaitForSecondsRealtime(0.5f);
+            }
+        }
+        finally
+        {
+            Multiplayer.LogDebug(() => $"WaitForControlToSettle() Control [{control.name}, {portNetId}], releasing authority for car {CurrentID} after {Time.time - time}");
             NetworkLifecycle.Instance.Client?.SendTrainControlAuthorityRequest(NetId, portNetId, false);
         }
     }
@@ -1875,6 +2051,7 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
     public void Client_ReceiveAuthorityUpdate(uint portNetId, ControlAuthorityState state)
     {
         bool shouldBlock = state == ControlAuthorityState.Blocked || state == ControlAuthorityState.Denied;
+        bool shouldEnable = !shouldBlock;
         portNetIdToBlockState[portNetId] = shouldBlock;
 
         Multiplayer.LogDebug(() => $"Client_ReceiveAuthorityUpdate({portNetId}, {state}) for [{CurrentID}, {NetId}]");
@@ -1882,17 +2059,33 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
         if (!portNetIdToControl.TryGetValue(portNetId, out var control) || control == null)
             return;
 
+        var whistleRopeController = control?.transform.parent.GetComponentInChildren<WhistleRopeController>();
+        var handCarBarController = control?.transform.parent.GetComponentInChildren<HandcarBarController>();
+        var hinge = control.GetComponent<HingeJoint>();
+        Multiplayer.LogDebug(() => $"Client_ReceiveAuthorityUpdate() Control [{control.name}, {portNetId}] for car [{CurrentID}, {NetId}], shouldBlock: {shouldBlock}, isHinge: {hinge != null}, isWhistle: {whistleRopeController != null}");
+
         if (shouldBlock)
         {
             control.ForceEndInteraction();
-            control.BlockControl(true);
-            control.InteractionAllowed = false;
+
+            if ((control is IScrollable scrollable) && scrollingControls.TryGetValue(scrollable, out var isScrolling) && isScrolling != null)
+            {
+                StopCoroutine(isScrolling);
+                scrollingControls.Remove(scrollable);
+            }
         }
-        else
-        {
-            control.BlockControl(false);
-            control.InteractionAllowed = true;
-        }
+
+        control.BlockControl(shouldBlock);
+        control.InteractionAllowed = shouldEnable;
+
+        if (hinge != null)
+            control.enabled = shouldEnable;
+
+        if (whistleRopeController != null)
+            whistleRopeController.enabled = shouldEnable;
+
+        if (handCarBarController != null)
+            handCarBarController.enabled = shouldEnable;
     }
     #endregion
 }

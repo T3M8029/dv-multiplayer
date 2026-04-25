@@ -48,7 +48,7 @@ class RespawnOnDropPatch
 
         if (startIndex < 0)
         {
-            Multiplayer.LogError(() => $"RespawnOnDrop.RespawnOrDestroy() transpiler failed - start index not found!");
+            Multiplayer.LogError($"RespawnOnDrop.RespawnOrDestroy() transpiler failed - start index not found!");
             return codes.AsEnumerable();
         }
 
@@ -59,7 +59,7 @@ class RespawnOnDropPatch
 
         if (endIndex < 0)
         {
-            Multiplayer.LogError(() => $"RespawnOnDrop.RespawnOrDestroy() transpiler failed - end index not found!");
+            Multiplayer.LogError($"RespawnOnDrop.RespawnOrDestroy() transpiler failed - end index not found!");
             return codes.AsEnumerable();
         }
 

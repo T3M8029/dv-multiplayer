@@ -15,6 +15,8 @@ public class CashRegisterWithModulesPatch
     private static bool OnDisable(CashRegisterWithModules __instance)
     {
         //Multiplayer.LogDebug(() => $"CashRegisterWithModules.OnDisable({__instance.GetObjectPath()})");
+        if (__instance == null)
+            return true;
 
         __instance?.StopAllCoroutines();
         __instance?.textController?.Clear();

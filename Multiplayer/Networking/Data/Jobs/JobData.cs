@@ -3,7 +3,6 @@ using DV.ThingTypes;
 using LiteNetLib.Utils;
 using MPAPI.Types;
 using Multiplayer.Components.Networking.Jobs;
-using Multiplayer.Components.Networking.World;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -28,7 +27,7 @@ public class JobData
     public ushort ItemNetID { get; set; }
     public ItemPositionData ItemPosition { get; set; }
 
-    public static JobData FromJob(NetworkedStationController netStation, NetworkedJob networkedJob)
+    public static JobData FromJob(NetworkedJob networkedJob)
     {
         Job job = networkedJob.Job;
 

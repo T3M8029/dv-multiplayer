@@ -6,6 +6,17 @@ namespace Multiplayer.Components.Networking.UI;
 
 public class PlayerListGUI : MonoBehaviour
 {
+    private const float WINDOW_WIDTH = 250;
+    private const float WINDOW_HEIGHT = 0; // Height will be determined by the content
+    private const float WINDOW_PADDING = 25;
+
+    public enum PlayerListPosition
+    {
+        TopLeft,
+        TopRight,
+        TopCenter
+    }
+
     private bool showPlayerList;
     private string LocalPlayerUsername => NetworkLifecycle.Instance?.Client?.DisplayName ?? Multiplayer.Settings.GetUserName();
 
@@ -30,7 +41,23 @@ public class PlayerListGUI : MonoBehaviour
         if (!showPlayerList)
             return;
 
-        GUILayout.Window(157031520, new Rect(Screen.width / 2.0f - 125, 25, 250, 0), DrawPlayerList, Locale.PLAYER_LIST__TITLE);
+        var position = Multiplayer.Settings.PlayerListPosition;
+        Rect windowPos;
+
+        if (position == PlayerListPosition.TopCenter || (position == PlayerListPosition.TopLeft && Multiplayer.Settings.ShowStats))
+        {
+            windowPos = new Rect((Screen.width - WINDOW_WIDTH)/2f, WINDOW_PADDING, WINDOW_WIDTH, WINDOW_HEIGHT);
+        }
+        else if (position == PlayerListPosition.TopRight)
+        {
+            windowPos = new Rect(Screen.width - WINDOW_WIDTH - WINDOW_PADDING, WINDOW_PADDING, WINDOW_WIDTH, WINDOW_HEIGHT);
+        }
+        else
+        {
+            windowPos = new Rect(WINDOW_PADDING, WINDOW_PADDING, WINDOW_WIDTH, WINDOW_HEIGHT);
+        }
+
+        GUILayout.Window(157031520, windowPos, DrawPlayerList, Locale.PLAYER_LIST__TITLE);
     }
 
     private void DrawPlayerList(int windowId)

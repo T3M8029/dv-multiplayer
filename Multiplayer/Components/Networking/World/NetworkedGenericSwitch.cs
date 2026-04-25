@@ -13,6 +13,7 @@ public class NetworkedGenericSwitch : MonoBehaviour
     private static readonly Dictionary<NetworkedGenericSwitch, uint> networkedToNetId = [];
     private static readonly Dictionary<GenericSwitch, uint> genericSwitchToNetId = [];
 
+    public static IEnumerable<NetworkedGenericSwitch> AllSwitches => netIdtoNetworked.Values;
     public static bool TryGet(uint netId, out NetworkedGenericSwitch netSwitch)
     {
         return netIdtoNetworked.TryGetValue(netId, out netSwitch);
@@ -33,6 +34,8 @@ public class NetworkedGenericSwitch : MonoBehaviour
 
     public uint NetId { get; private set; }
     public GenericSwitch Switch { get; private set; }
+
+    public bool IsOn => Switch?.IsOn ?? false;
 
 
 
