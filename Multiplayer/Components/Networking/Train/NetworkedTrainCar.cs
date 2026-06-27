@@ -195,8 +195,8 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
     private bool cargoIsLoading;
     public byte CargoModelIndex = byte.MaxValue;
     private bool carHealthDirty;
-    private bool sendCouplers;
-    private bool sendCables;
+    public bool sendCouplers;
+    public bool sendCables;
 
     public bool IsDestroying;
 
@@ -875,7 +875,7 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
         );
     }
 
-    private void Server_SendCouplers()
+    public void Server_SendCouplers()
     {
         if (!sendCouplers)
             return;
@@ -906,7 +906,7 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
         NetworkLifecycle.Instance.Server.SendCockState(NetId, TrainCar.rearCoupler, TrainCar.rearCoupler.IsCockOpen);
     }
 
-    private void Server_SendCables()
+    public void Server_SendCables()
     {
         if (!sendCables)
             return;

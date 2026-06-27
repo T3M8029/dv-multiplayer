@@ -10,7 +10,9 @@ using DV.ServicePenalty.UI;
 using DV.ThingTypes;
 using DV.UI;
 using DV.UserManagement;
+using DV.Utils;
 using DV.WeatherSystem;
+using HarmonyLib;
 using LiteNetLib;
 using LiteNetLib.Utils;
 using MPAPI.Interfaces.Packets;
@@ -47,6 +49,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using Unity.Jobs;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
@@ -73,6 +76,13 @@ public class NetworkClient : NetworkManager
     internal uint trainSetsToSpawn = uint.MaxValue;
     internal uint trainSetsSpawned = 0;
     internal bool railwayStateLoaded = false;
+    internal bool noCarTimeout = false;
+
+    private Queue<ClientboundTaskUpdatePacket> ClientboundTaskUpdateQueue = new();
+    private bool taskUpdateProcessing;
+
+    private Queue<ClientboundJobsUpdatePacket> ClientboundJobUpdateQueue = new();
+    private bool jobUpdateProcessing;
 
     // One way ping in milliseconds
     public int Ping { get; private set; }
@@ -191,6 +201,7 @@ public class NetworkClient : NetworkManager
         netPacketProcessor.SubscribeReusable<CommonHoseConnectedPacket>(OnCommonHoseConnectedPacket);
         netPacketProcessor.SubscribeReusable<CommonHoseDisconnectedPacket>(OnCommonHoseDisconnectedPacket);
         netPacketProcessor.SubscribeReusable<CommonCockFiddlePacket>(OnCommonCockFiddlePacket);
+        netPacketProcessor.SubscribeReusable<ClientboudCouplingStatePacket>(OnClientboudCouplingStatePacket);
 
         netPacketProcessor.SubscribeReusable<CommonMuConnectedPacket>(OnCommonMuConnectedPacket);
         netPacketProcessor.SubscribeReusable<CommonMuDisconnectedPacket>(OnCommonMuDisconnectedPacket);
@@ -897,6 +908,19 @@ public class NetworkClient : NetworkManager
         coupler.IsCockOpen = packet.IsOpen;
     }
 
+    private void OnClientboudCouplingStatePacket(ClientboudCouplingStatePacket packet)
+    {
+        if (!NetworkedTrainCar.TryGet(packet.NetId, out TrainCar trainCar))
+            return;
+
+        LogDebug(() => $"OnClientboudCouplingStatePacket({trainCar.ID})");
+
+        NetworkedCarSpawner.HandleCoupling(packet.FrontCouplingData, trainCar.frontCoupler);
+        NetworkedCarSpawner.HandleCoupling(packet.RearCouplingData, trainCar.rearCoupler);
+
+        if (trainCar.IsMultipleUnit) trainCar.muModule.MultipleUnitStateRestoreOnGameLoad(packet.FronMuConnected, packet.RearMuConnected);
+    }
+
     private void OnCommonBrakeCylinderReleasePacket(CommonBrakeCylinderReleasePacket packet)
     {
         if (!NetworkedTrainCar.TryGet(packet.NetId, out TrainCar trainCar))
@@ -1168,7 +1192,9 @@ public class NetworkClient : NetworkManager
 
         Log($"Received {packet.Jobs.Length} jobs for station {networkedStationController.StationController.logicStation.ID}");
 
-        networkedStationController.AddJobs(packet.Jobs);
+        networkedStationController.AddJobs(packet.Jobs, noCarTimeout);
+        noCarTimeout = false;
+        NetworkedStationController.WaitingNSCs.Remove(networkedStationController.NetId);
     }
 
     private void OnClientboundJobsUpdatePacket(ClientboundJobsUpdatePacket packet)
@@ -1176,15 +1202,44 @@ public class NetworkClient : NetworkManager
         if (NetworkLifecycle.Instance.IsHost())
             return;
 
-        if (!NetworkedStationController.Get(packet.StationNetId, out NetworkedStationController networkedStationController))
+        ClientboundJobUpdateQueue.Enqueue(packet);
+        if (!jobUpdateProcessing)
         {
-            LogError($"OnClientboundJobsUpdatePacket() {packet.StationNetId} does not exist!");
-            return;
+            jobUpdateProcessing = true;
+            SingletonBehaviour<CoroutineManager>.Instance.Run(ProcessClientboundJobUpdatePackets());
         }
 
-        Log($"Received {packet.JobUpdates.Length} job updates for station {networkedStationController.StationController.logicStation.ID}");
+    }
 
-        networkedStationController.UpdateJobs(packet.JobUpdates);
+    private IEnumerator ProcessClientboundJobUpdatePackets()
+    {
+        while (ClientboundJobUpdateQueue.Count > 0)
+        {
+            var packet = ClientboundJobUpdateQueue.Dequeue();
+
+            if (!NetworkedStationController.Get(packet.StationNetId, out NetworkedStationController networkedStationController))
+            {
+                LogError($"OnClientboundJobsUpdatePacket() {packet.StationNetId} does not exist!");
+                continue;
+            }
+
+            Log($"Received {packet.JobUpdates.Length} job updates for station {networkedStationController.StationController.logicStation.ID}");
+
+            int waitingNSCsFrameCounter = 0;
+
+            if (NetworkedStationController.WaitingNSCs.Contains(packet.StationNetId)) LogDebug(() => $"Station {networkedStationController.StationController.stationInfo.YardID} is waiting for new jobs, job updates will be processed later");
+            while (waitingNSCsFrameCounter < 600 && NetworkedStationController.WaitingNSCs.Contains(packet.StationNetId))
+            {
+                waitingNSCsFrameCounter++;
+                yield return null;
+            }
+
+            if (waitingNSCsFrameCounter >= 600) LogWarning($"NetworkClient.ProcessClientboundJobUpdatePackets timed out waiting for NSC with netId {packet.StationNetId}");
+
+            yield return networkedStationController.UpdateJobs(packet.StationNetId, packet.JobUpdates);
+        }
+
+        jobUpdateProcessing = false;
     }
 
     private void OnClientboundTaskUpdatePacket(ClientboundTaskUpdatePacket packet)
@@ -1192,15 +1247,98 @@ public class NetworkClient : NetworkManager
         if (NetworkLifecycle.Instance.IsHost())
             return;
 
-        if (!NetworkedTask.TryGet(packet.TaskNetId, out Task task) || task == null)
+        ClientboundTaskUpdateQueue.Enqueue(packet);
+        if (!taskUpdateProcessing)
         {
-            LogError($"Received task update for taskNetId {packet.TaskNetId}, task was not found");
-            return;
+            taskUpdateProcessing = true;
+            SingletonBehaviour<CoroutineManager>.Instance.Run(ProcessClientboundTaskUpdatePackets());
         }
+    }
 
-        task.SetState(packet.NewState);
-        task.taskStartTime = packet.TaskStartTime;
-        task.taskFinishTime = packet.TaskFinishTime;
+    private IEnumerator ProcessClientboundTaskUpdatePackets()
+    {
+        try
+        {
+            while (ClientboundTaskUpdateQueue.Count > 0)
+            {
+                int waitingNSCsFrameCounter = 0;
+
+                if (NetworkedStationController.WaitingNSCs.Any()) LogDebug(() => $"Stations are waiting for new jobs, task updates will be processed later");
+                while (waitingNSCsFrameCounter < 600 && NetworkedStationController.WaitingNSCs.Any())
+                {
+                    waitingNSCsFrameCounter++;
+                    yield return null;
+                }
+
+                if (waitingNSCsFrameCounter >= 600) LogWarning("NetworkClient.ProcessClientboundTaskUpdatePackets timed out waiting for waitingNSCs");
+
+                var packet = ClientboundTaskUpdateQueue.Dequeue();
+
+                int delayedJobsWaitFrameCounter = 0;
+                if (NetworkedStationController.DelayedJobs.Contains(packet.JobNetId)) Multiplayer.LogDebug(() => $"Job with netId {packet.JobNetId} is delayed in its creation, will wait with task updating");
+                while (delayedJobsWaitFrameCounter < 600 && NetworkedStationController.DelayedJobs.Contains(packet.JobNetId))
+                {
+                    delayedJobsWaitFrameCounter++;
+                    yield return null;
+                }
+
+                if (delayedJobsWaitFrameCounter >= 600) LogWarning($"NetworkClient.ProcessClientboundTaskUpdatePackets timed out waiting for delayed job with netId {packet.JobNetId}");
+
+                if (!NetworkedTask.TryGet(packet.TaskNetId, out Task task) || task == null)
+                {
+                    LogError($"Received task update for taskNetId {packet.TaskNetId}, task was not found");
+                    continue;
+                }
+
+                if (packet.TaskStateUpdate == true)
+                {
+                    task.SetState(packet.NewState);
+                    task.taskStartTime = packet.TaskStartTime;
+                    task.taskFinishTime = packet.TaskFinishTime;
+                }
+
+                if (packet.ReplaceDestTrack == true)
+                {
+                    var track = (NetworkedRailTrack.TryGet(packet.DestTrackId, out RailTrack railTrack) ? railTrack.LogicTrack() : null);
+                    if (track != null) Traverse.Create(task).Field("destinationTrack").SetValue(track);
+                }
+
+                if (packet.ReplaceCar == true)
+                {
+                    int carWaitCounter = 0;
+                    while (carWaitCounter < 600 && !NetworkedTrainCar.TryGet(packet.CarNetID, out Car _))
+                    {
+                        carWaitCounter++;
+                        yield return null;
+                    }
+
+                    if (!NetworkedTrainCar.TryGet(packet.CarNetID, out Car car))
+                    {
+                        LogError($"No car for netId {packet.CarNetID} found, skipping replacement!");
+                        continue;
+                    }
+
+                    void ReplaceCar(Task t)
+                    {
+                        var cars = Traverse.Create(t).Field("cars").GetValue<IList<Car>>();
+                        if (cars == null) return;
+                        if (cars.Remove(cars.FirstOrDefault(c => c.ID == car.ID)))
+                        {
+                            cars.Add(car);
+                            SingletonBehaviour<CoroutineManager>.Instance.Run(NetworkedStationController.UpdateCarPlates([packet.CarNetID], t.Job.ID));
+                        }
+                    }
+
+                    NetworkedTask.DoOnActualTask(task, ReplaceCar);
+                }
+
+                yield return WaitFor.EndOfFrame;
+            }
+        }
+        finally
+        {
+            taskUpdateProcessing = false;
+        }
     }
 
     private void OnClientboundJobValidateResponsePacket(ClientboundJobValidateResponsePacket packet)
@@ -1778,6 +1916,20 @@ public class NetworkClient : NetworkManager
         {
             NetId = netId,
             WarehouseAction = action,
+        }, DeliveryMethod.ReliableUnordered);
+    }
+
+    public void SendJobsRequest(NetworkedStationController station, ushort[] alreadyPresent, bool generateJobs)
+    {
+        LogDebug(() => $"Client asking for jobs in {station.StationController.stationInfo.YardID}, excluding {alreadyPresent.Length} already present jobs ");
+        noCarTimeout = true;
+        NetworkedStationController.WaitingNSCs.Add(station.NetId);
+
+        SendPacketToServer(new ServerboundJobsRequestPacket
+        {
+            StationNetId = station.NetId,
+            GenerateJobs = generateJobs,
+            ExcludeJobNetId = alreadyPresent
         }, DeliveryMethod.ReliableUnordered);
     }
 

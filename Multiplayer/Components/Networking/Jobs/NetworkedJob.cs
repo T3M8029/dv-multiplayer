@@ -1,10 +1,13 @@
 using DV.CabControls;
 using DV.InventorySystem;
 using DV.Logic.Job;
+using HarmonyLib;
+using Multiplayer.API;
 using Multiplayer.Components.Networking.World;
 using Multiplayer.Networking.Data.Jobs;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 
 namespace Multiplayer.Components.Networking.Jobs;
@@ -173,6 +176,12 @@ public class NetworkedJob : IdMonoBehaviour<ushort, NetworkedJob>
         job.JobCompleted += OnJobCompleted;
         job.JobExpired += OnJobExpired;
 
+        if (Multiplayer.PersJobs)
+        {
+            Multiplayer.PersJobsJobTrackChangedEventRegMethod.Invoke(null, [(Action<Job>)OnJobTrackChanged]);
+            Multiplayer.PersJobsJobCarChangedEventRegMethod.Invoke(null, [(Action<(Job, Car)>)OnJobCarChanged]);
+        }
+
         // If this is called after Start(), we need to add to cache here
         if (gameObject.activeInHierarchy)
         {
@@ -275,6 +284,17 @@ public class NetworkedJob : IdMonoBehaviour<ushort, NetworkedJob>
     {
         Cause = DirtyCause.JobState;
         OnJobDirty?.Invoke(this);
+    }
+
+    private void OnJobTrackChanged(Job job)
+    {
+        if (job.ID == Job.ID) foreach (var task in job.tasks) NetworkedTask.DoOnActualTask(task, t => { if (NetworkedTask.TryGet(t, out var netTask)) netTask.UpdateDestinationTrack(); });
+    }
+
+    private void OnJobCarChanged((Job, Car) jct)
+    {
+        var (job, car) = jct;
+        if (job.ID == Job.ID) foreach (var task in job.tasks) NetworkedTask.DoOnActualTask(task, t => { if (NetworkedTask.TryGet(t, out var netTask)) netTask.UpdateCar(car); });
     }
 
     public void AddReport(NetworkedItem item)

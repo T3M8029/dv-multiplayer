@@ -77,4 +77,22 @@ public static class CarSpawner_Patch
         NetworkLifecycle.Instance.Server.SendSpawnTrainset([__result], true, true);
 
     }
+
+    //gets triggered on save load or by PersJobs only
+    [HarmonyPatch(nameof(CarSpawner.SpawnLoadedCar))]
+    [HarmonyPostfix]
+    private static void SpawnLoadedCar(TrainCar __result)
+    {
+        if (UnloadWatcher.isUnloading)
+            return;
+
+        if (!NetworkLifecycle.Instance.IsHost())
+            return;
+
+        if (__result == null)
+            return;
+
+        Multiplayer.LogDebug(() => $"SpawnLoadedCar() {__result?.carLivery?.name} spawned, sending to players");
+        NetworkLifecycle.Instance.Server.SendSpawnTrainset([__result], false, true);
+    }
 }
