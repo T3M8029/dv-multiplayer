@@ -1,11 +1,13 @@
 using DV.CabControls;
 using DV.InventorySystem;
 using DV.Logic.Job;
+using DV.Utils;
 using HarmonyLib;
 using Multiplayer.API;
 using Multiplayer.Components.Networking.World;
 using Multiplayer.Networking.Data.Jobs;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
@@ -130,6 +132,9 @@ public class NetworkedJob : IdMonoBehaviour<ushort, NetworkedJob>
 
     private readonly List<NetworkedItem> JobReports = [];
 
+    private object[] OnJobTrackChengeEventRegistrator;
+    private object[] OnJobCarChangedEventRegistrator;
+
     public Guid OwnedBy { get; set; } = Guid.Empty;
     public JobValidator JobValidator { get; set; }
 
@@ -178,8 +183,10 @@ public class NetworkedJob : IdMonoBehaviour<ushort, NetworkedJob>
 
         if (Multiplayer.PersJobs)
         {
-            Multiplayer.PersJobsJobTrackChangedEventRegMethod.Invoke(null, [(Action<Job>)OnJobTrackChanged]);
-            Multiplayer.PersJobsJobCarChangedEventRegMethod.Invoke(null, [(Action<(Job, Car)>)OnJobCarChanged]);
+            OnJobTrackChengeEventRegistrator = [(Action<Job>)OnJobTrackChanged];
+            OnJobCarChangedEventRegistrator = [(Action<(Job, Car)>)OnJobCarChanged];
+            Multiplayer.PersJobsJobTrackChangedEventRegMethod.Invoke(null, OnJobTrackChengeEventRegistrator);
+            Multiplayer.PersJobsJobCarChangedEventRegMethod.Invoke(null, OnJobCarChangedEventRegistrator);
         }
 
         // If this is called after Start(), we need to add to cache here
@@ -293,8 +300,28 @@ public class NetworkedJob : IdMonoBehaviour<ushort, NetworkedJob>
 
     private void OnJobCarChanged((Job, Car) jct)
     {
+        Multiplayer.LogDebug(() => $"OnJobCarChanged() fired for {jct.Item2.ID} in {jct.Item1.ID}");
+        SingletonBehaviour<CoroutineManager>.Instance.Run(OnJobCarChangedDelayed(jct));
+    }
+
+    private IEnumerator OnJobCarChangedDelayed((Job, Car) jct)
+    {
+        if (Multiplayer.PersJobs)
+        {
+            if ((bool)Multiplayer.PersJobsResumeCoroRunningField.GetValue(null)) Multiplayer.LogDebug(() => $"Cars still resuming, waiting with job car changes");
+            //while ((bool)Multiplayer.PersJobsResumeCoroRunningField.GetValue(null)) yield return WaitFor.EndOfFrame;
+            yield return new WaitUntil(() => (bool)Multiplayer.PersJobsResumeCoroRunningField.GetValue(null) == false);
+        }
+        yield return null;
         var (job, car) = jct;
         if (job.ID == Job.ID) foreach (var task in job.tasks) NetworkedTask.DoOnActualTask(task, t => { if (NetworkedTask.TryGet(t, out var netTask)) netTask.UpdateCar(car); });
+        yield break;
+    }
+
+    public bool TryGetNetworkedStationControllerHandlingNetworkedJob(out NetworkedStationController networkedStationController)
+    {
+        networkedStationController = NetworkedStationController.stationControllerToNetworkedStationController.Values.ToArray().FirstOrDefault(sc => sc.NetworkedJobs.Contains(this));
+        return (networkedStationController == null) ? false : true;
     }
 
     public void AddReport(NetworkedItem item)
@@ -376,6 +403,14 @@ public class NetworkedJob : IdMonoBehaviour<ushort, NetworkedJob>
         Job.JobAbandoned -= OnJobAbandoned;
         Job.JobCompleted -= OnJobCompleted;
         Job.JobExpired -= OnJobExpired;
+
+        if (Multiplayer.PersJobs)
+        {
+            Multiplayer.PersJobsJobTrackChangedEventRegMethod.Invoke(null, OnJobTrackChengeEventRegistrator);
+            Multiplayer.PersJobsJobCarChangedEventUnregMethod.Invoke(null, OnJobCarChangedEventRegistrator);
+            OnJobTrackChengeEventRegistrator = null;
+            OnJobCarChangedEventRegistrator = null;
+        }
 
         Destroy(this);
     }

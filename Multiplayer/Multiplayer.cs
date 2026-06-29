@@ -54,7 +54,10 @@ public static class Multiplayer
 
     public static bool PersJobs = false;
     public static MethodInfo PersJobsJobTrackChangedEventRegMethod;
+    public static MethodInfo PersJobsJobTrackChangedEventUnregMethod;
     public static MethodInfo PersJobsJobCarChangedEventRegMethod;
+    public static MethodInfo PersJobsJobCarChangedEventUnregMethod;
+    public static FieldInfo PersJobsResumeCoroRunningField;
 
     [UsedImplicitly]
     public static bool Load(UnityModManager.ModEntry modEntry)
@@ -201,7 +204,10 @@ public static class Multiplayer
             LogDebug(() => "Loading compat with PersistentJobs");
 
             PersJobsJobTrackChangedEventRegMethod = AccessTools.Method(AccessTools.TypeByName("PersistentJobsMod.ModInteraction.PersistentJobsModInteractionFeatures"), "RegisterJobTracksChangedListener", [typeof(Action<Job>)]);
+            PersJobsJobTrackChangedEventUnregMethod = AccessTools.Method(AccessTools.TypeByName("PersistentJobsMod.ModInteraction.PersistentJobsModInteractionFeatures"), "UnregisterJobTracksChangedListener", [typeof(Action<Job>)]);
             PersJobsJobCarChangedEventRegMethod = AccessTools.Method(AccessTools.TypeByName("PersistentJobsMod.ModInteraction.PersistentJobsModInteractionFeatures"), "RegisterJobCarsChangedListener", [typeof(Action<(Job, Car)>)]);
+            PersJobsJobCarChangedEventUnregMethod = AccessTools.Method(AccessTools.TypeByName("PersistentJobsMod.ModInteraction.PersistentJobsModInteractionFeatures"), "UnegisterJobCarsChangedListener", [typeof(Action<(Job, Car)>)]);
+            PersJobsResumeCoroRunningField = AccessTools.Field(AccessTools.TypeByName("PersistentJobsMod.Optimization.FarCarOpt"), "ResumeCoroRunning");
             PersJobs = true;
         }
         catch

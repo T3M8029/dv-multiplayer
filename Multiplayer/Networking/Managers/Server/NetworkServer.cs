@@ -963,7 +963,8 @@ public class NetworkServer : NetworkManager
 
     public void SendTaskUpdate(ushort jobNetId, ushort taskNetId, TaskState newState, float taskStartTime, float taskFinishTime)
     {
-        Multiplayer.Log($"Sending TaskUpdate for taskNetId {taskNetId}, newState {newState}");
+        NetworkedJob.TryGetJob(jobNetId, out var job);
+        Multiplayer.Log($"Sending TaskUpdate for taskNetId {taskNetId}, in job {job.ID} newState {newState}");
         SendPacketToAll
         (
             new ClientboundTaskUpdatePacket
@@ -2044,21 +2045,42 @@ public class NetworkServer : NetworkManager
             return;
         }
 
-        if (packet.GenerateJobs)
-        {
-            LogDebug(() => $"ServerboundJobsRequestPacket requested job generation for station {packet.StationNetId}");
-            networkedStationController.StationController.ProceduralJobsController.TryToGenerateJobs();
-        }
-
         SingletonBehaviour<CoroutineManager>.Instance.Run(SendJobsToClientsOnRequest(packet, networkedStationController));
     }
 
     private IEnumerator SendJobsToClientsOnRequest(ServerboundJobsRequestPacket packet, NetworkedStationController networkedStationController)
     {
+        if (Multiplayer.PersJobs)
+        {
+            if ((bool)Multiplayer.PersJobsResumeCoroRunningField.GetValue(null)) LogDebug(() => $"ServerboundJobsRequestPacket station {packet.StationNetId} is probably resuming cars, waiting");
+            while ((bool)Multiplayer.PersJobsResumeCoroRunningField.GetValue(null)) yield return null;
+        }
+
+        if (packet.GenerateJobs)
+        {
+            LogDebug(() => $"ServerboundJobsRequestPacket requested job generation for station {packet.StationNetId}");
+
+            if (!networkedStationController.StationController.ProceduralJobsController.IsJobGenerationActive)
+            {
+                networkedStationController.StationController.ProceduralJobsController.TryToGenerateJobs();
+                yield return null;
+            }
+            else
+            {
+                LogDebug(() => $"ServerboundJobsRequestPacket station {packet.StationNetId} is already generating, won´t trigger again");
+            }
+        }
+
+        if (Multiplayer.PersJobs)
+        {
+            if ((bool)Multiplayer.PersJobsResumeCoroRunningField.GetValue(null)) LogDebug(() => $"ServerboundJobsRequestPacket station {packet.StationNetId} is probably resuming cars, waiting");
+            while ((bool)Multiplayer.PersJobsResumeCoroRunningField.GetValue(null)) yield return null;
+        }
+
         if (networkedStationController.StationController.ProceduralJobsController.IsJobGenerationActive) LogDebug(() => $"Station {networkedStationController.StationController.stationInfo.YardID} is still generating jobs, will wait with sending");
         while (networkedStationController.StationController.ProceduralJobsController.IsJobGenerationActive) yield return null;
 
-        var send = networkedStationController.NetworkedJobs.Where(nj => !packet.ExcludeJobNetId.Contains(nj.NetId)).ToArray();
+        NetworkedJob[] send = (packet.SpecificJobsNetIds.Any()) ? networkedStationController.NetworkedJobs.Where(nj => packet.SpecificJobsNetIds.Contains(nj.NetId)).ToArray() : networkedStationController.NetworkedJobs.Where(nj => !packet.ExcludeJobNetId.Contains(nj.NetId)).ToArray();
         NetworkLifecycle.Instance.Server.SendJobsCreatePacket(networkedStationController, send);
     }
 
