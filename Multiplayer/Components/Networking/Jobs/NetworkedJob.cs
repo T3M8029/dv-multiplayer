@@ -314,7 +314,7 @@ public class NetworkedJob : IdMonoBehaviour<ushort, NetworkedJob>
         }
         yield return null;
         var (job, car) = jct;
-        if (job.ID == Job.ID) foreach (var task in job.tasks) NetworkedTask.DoOnActualTask(task, t => { if (NetworkedTask.TryGet(t, out var netTask)) netTask.UpdateCar(car); });
+        if (job.ID == Job.ID) foreach (var task in job.tasks) NetworkedTask.DoOnActualTask(task, t => { if (((t.GetType() != typeof(ParallelTasks)) && (t.GetType() != typeof(SequentialTasks))) && (NetworkedTask.TryGet(t, out var netTask))) netTask.UpdateCar(car); });
         yield break;
     }
 

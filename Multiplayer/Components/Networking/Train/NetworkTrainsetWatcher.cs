@@ -104,6 +104,7 @@ public class NetworkTrainsetWatcher : SingletonBehaviour<NetworkTrainsetWatcher>
             // If we can locate the networked car, we'll add to the ticks counter and check if any tracks are dirty
             if (NetworkedTrainCar.TryGetFromTrainCar(trainCar, out NetworkedTrainCar netTC) && netTC != null)
             {
+                if (netTC.doNotUpdate) return;
                 maxTicksReached |= netTC.TicksSinceSync >= MAX_UNSYNC_TICKS; //Even if the car is stationary, if the max ticks has been exceeded we will still sync
                 anyTracksDirty |= netTC.BogieTracksDirty;
             }

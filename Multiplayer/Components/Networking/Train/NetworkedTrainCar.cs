@@ -210,6 +210,9 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
 
     private readonly Dictionary<uint, ServerPlayer> portAuthority = [];
 
+    public bool doNotUpdate = true;
+    public uint? startTick = null;
+
     #endregion
 
     #region Client Variables
@@ -850,14 +853,29 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
         if (UnloadWatcher.isUnloading)
             return;
 
-        Server_SendBrakeStates();
-        Server_SendCouplers();
-        Server_SendCables();
-        Server_SendCargoState();
-        Server_SendCargoHealthUpdate();
-        Server_SendCarHealthState();
+        if (!startTick.HasValue)
+        {
+            startTick = tick;
+            Server_SendCargoState();
+            Server_SendCargoHealthUpdate();
+            Server_SendCarHealthState();
+        }
 
-        TicksSinceSync++; //keep track of last full sync
+        if (!doNotUpdate)
+        {
+            Server_SendBrakeStates();
+            Server_SendCouplers();
+            Server_SendCables();
+            Server_SendCargoState();
+            Server_SendCargoHealthUpdate();
+            Server_SendCarHealthState();
+
+            TicksSinceSync++; //keep track of last full sync
+        }
+        else
+        {
+            if ((tick - startTick > 120) && !((bool)Multiplayer.PersJobsResumeCoroRunningField?.GetValue(null) == true)) doNotUpdate = false;
+        }
     }
 
     private void Server_SendBrakeStates()
