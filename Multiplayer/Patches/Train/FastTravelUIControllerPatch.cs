@@ -1,13 +1,8 @@
 using DV.UI;
 using HarmonyLib;
 using Multiplayer.Components.Networking;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
-namespace Multiplayer.Patches.Player;
+namespace Multiplayer.Patches.Train;
 
 [HarmonyPatch(typeof(FastTravelUIController))]
 public static class FastTravelUIControllerPatch
