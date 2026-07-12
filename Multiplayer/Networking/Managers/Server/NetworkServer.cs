@@ -22,6 +22,7 @@ using Multiplayer.Components.Networking.World;
 using Multiplayer.Networking.Data;
 using Multiplayer.Networking.Data.Items;
 using Multiplayer.Networking.Data.Jobs;
+using Multiplayer.Networking.Data.Player;
 using Multiplayer.Networking.Data.RPCs;
 using Multiplayer.Networking.Data.Train;
 using Multiplayer.Networking.Data.World;
@@ -195,6 +196,7 @@ public class NetworkServer : NetworkManager
         // Player
         netPacketProcessor.SubscribeReusable<ServerboundPlayerPositionPacket, ITransportPeer>(OnServerboundPlayerPositionPacket);
         netPacketProcessor.SubscribeReusable<ServerboundLicensePurchaseRequestPacket, ITransportPeer>(OnServerboundLicensePurchaseRequestPacket);
+        netPacketProcessor.SubscribeReusable<ServerboundPlayerPreferenceUpdatePacket, ITransportPeer>(OnServerboundPlayerPreferenceUpdatePacket);
 
 
         // Train
@@ -823,14 +825,15 @@ public class NetworkServer : NetworkManager
         );
     }
 
-    public void SendPlayerPreferencesUpdate(ServerPlayer player)
+    public void SendPlayerPreferencesUpdate(ServerPlayer player, Dictionary<PlayerPreference, string> preferences)
     {
         Log($"Sending player preferences update for '{player.Username}'");
 
         var packet = new ClientboundPlayerPreferencesUpdatePacket
         {
             PlayerId = player.PlayerId,
-            CrewName = player.CrewName
+            PreferenceKeys = Array.ConvertAll(preferences.Keys.ToArray(), item => (byte)item),
+            PreferenceValues = preferences.Values.ToArray()
         };
 
         SendPacketToAll(packet, DeliveryMethod.ReliableUnordered, PlayerLoadingState.Complete);
@@ -1172,7 +1175,9 @@ public class NetworkServer : NetworkManager
             peer,
             overrideUsername,
             packet.Username,
-            guid
+            guid,
+            packet.CharacterId,
+            packet.IsVR
         );
 
         serverPlayers.Add(serverPlayer.PlayerId, serverPlayer);
@@ -1354,10 +1359,13 @@ public class NetworkServer : NetworkManager
             {
                 PlayerId = player.PlayerId,
                 Username = player.Username,
+                IsVR = player.IsVR,
+                CharacterId = player.CharacterId,
                 CrewName = player.CrewName,
+                TrackingData = player.TrackingData,
+                Posture = player.Posture,
+                IsOnCar = player.CarId != 0,
                 CarID = player.CarId,
-                Position = player.RawPosition,
-                Rotation = player.RawRotationY
             };
 
             SendPacketToAll(clientboundPlayerJoinedPacket, DeliveryMethod.ReliableOrdered, PlayerLoadingState.Complete, peer);
@@ -1375,10 +1383,13 @@ public class NetworkServer : NetworkManager
                 {
                     PlayerId = otherPlayer.PlayerId,
                     Username = otherPlayer.Username,
+                    CharacterId = otherPlayer.CharacterId,
+                    IsVR = otherPlayer.IsVR,
                     CrewName = otherPlayer.CrewName,
                     CarID = otherPlayer.CarId,
-                    Position = otherPlayer.RawPosition,
-                    Rotation = otherPlayer.RawRotationY
+                    TrackingData = otherPlayer.TrackingData,  // full merged state
+                    Posture = otherPlayer.Posture,
+                    IsOnCar = otherPlayer.CarId != 0,
                 }, DeliveryMethod.ReliableOrdered);
             }
 
@@ -1395,21 +1406,40 @@ public class NetworkServer : NetworkManager
             return;
         }
 
+        // Merge incoming delta into stored state
+        player.TrackingData = player.TrackingData.MergeFrom(packet.TrackingData);
         player.CarId = packet.CarID;
-        player.RawPosition = packet.Position;
-        player.RawRotationY = packet.RotationY;
+        player.Posture = packet.Posture;
 
-        ClientboundPlayerPositionPacket clientboundPacket = new()
+        SendPacketToAll(new ClientboundPlayerPositionPacket
         {
             PlayerId = player.PlayerId,
-            Position = packet.Position,
-            MoveDir = packet.MoveDir,
-            RotationY = packet.RotationY,
-            IsJumpingIsOnCar = packet.IsJumpingIsOnCar,
+            TrackingData = packet.TrackingData,
+            Posture = packet.Posture,
+            IsOnCar = packet.IsOnCar,
             CarID = packet.CarID
-        };
+        }, DeliveryMethod.Sequenced, PlayerLoadingState.Complete, peer);
+    }
 
-        SendPacketToAll(clientboundPacket, DeliveryMethod.Sequenced, PlayerLoadingState.Complete, peer);
+    private void OnServerboundPlayerPreferenceUpdatePacket(ServerboundPlayerPreferenceUpdatePacket packet, ITransportPeer peer)
+    {
+        Dictionary<PlayerPreference, string> preferences = [];
+
+        if (!TryGetServerPlayer(peer, out ServerPlayer player))
+        {
+            LogWarning($"Received Player Preferences Update from {peer.GetType()}, peerId: {peer.Id}, but could not find matching player.");
+            return;
+        }
+
+        // Store the characterId for other players connecting to the server
+        if (packet.GetPreferencesDictionary().TryGetValue(PlayerPreference.CharacterModel, out string characterId))
+        {
+            player.CharacterId = characterId;
+            preferences.Add(PlayerPreference.CharacterModel, characterId);
+        }
+
+        if (preferences.Count > 0)
+            SendPlayerPreferencesUpdate(player, preferences);
     }
 
     private void OnServerboundTimeAdvancePacket(ServerboundTimeAdvancePacket packet, ITransportPeer peer)
