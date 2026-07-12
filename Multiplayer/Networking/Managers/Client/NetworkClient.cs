@@ -41,6 +41,7 @@ using Multiplayer.Networking.Packets.Serverbound.Train;
 using Multiplayer.Networking.TransportLayers;
 using Multiplayer.Patches.MainMenu;
 using Multiplayer.Patches.SaveGame;
+using Multiplayer.Patches.World;
 using Multiplayer.Utils;
 using Newtonsoft.Json.Linq;
 using System;
@@ -597,6 +598,8 @@ public class NetworkClient : NetworkManager
             packet.Apply(Globals.G.GameParams);
         if (Globals.G.gameParamsInstance != null)
             packet.Apply(Globals.G.gameParamsInstance);
+
+        TimeAdvancePatch.FastTravelAdvancesTime = packet.FastTravelAdvancesTime;
     }
 
     private void OnClientboundSaveGameDataPacket(ClientboundSaveGameDataPacket packet)

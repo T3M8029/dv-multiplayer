@@ -72,7 +72,7 @@ public abstract class NetworkManager
         netPacketProcessor.RegisterNestedType(ColorSerializer.Serialize, ColorSerializer.Deserialize);
     }
 
-    private void OnSettingsUpdated(Settings settings)
+    public virtual void OnSettingsUpdated(Settings settings)
     {
         transport?.UpdateSettings(settings);
     }

@@ -69,6 +69,7 @@ public class NetworkServer : NetworkManager
     public LobbyServerData ServerData;
     public RerailController rerailController;
 
+
     public IReadOnlyCollection<ServerPlayer> ServerPlayers => serverPlayers.Values;
     public IReadOnlyCollection<ServerPlayerWrapper> ServerPlayerWrappers => PlayerWrapperCache.Values;
     public int PlayerCount => ServerPlayers.Count;
@@ -103,6 +104,19 @@ public class NetworkServer : NetworkManager
         IsSinglePlayer = singlePlayer;
         ServerData = serverData;
         Difficulty = difficulty;
+
+        fastTravelAdvancesTime = settings.FastTravelAdvancesTime;
+        TimeAdvancePatch.FastTravelAdvancesTime = fastTravelAdvancesTime;
+    }
+
+    public override void OnSettingsUpdated(Settings settings)
+    {
+        if (settings.FastTravelAdvancesTime != fastTravelAdvancesTime)
+        {
+            fastTravelAdvancesTime = settings.FastTravelAdvancesTime;
+            TimeAdvancePatch.FastTravelAdvancesTime = fastTravelAdvancesTime;
+            SendGameParams(Globals.G.GameParams);
+        }
     }
 
     public override bool Start(int port)
@@ -503,7 +517,9 @@ public class NetworkServer : NetworkManager
 
     public void SendGameParams(GameParams gameParams)
     {
-        SendPacketToAll(ClientboundGameParamsPacket.FromGameParams(gameParams), DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForGameData, excludeSelf: true);
+        var packet = ClientboundGameParamsPacket.FromGameParams(gameParams);
+        packet.FastTravelAdvancesTime = fastTravelAdvancesTime;
+        SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForGameData, excludeSelf: true);
     }
 
     public void SendWeatherState(ITransportPeer peer = null)
@@ -1199,7 +1215,10 @@ public class NetworkServer : NetworkManager
 
                 PlayerConnected?.Invoke(player);
 
-                SendPacket(peer, ClientboundGameParamsPacket.FromGameParams(Globals.G.GameParams), DeliveryMethod.ReliableOrdered);
+                var gameParamsPacket = ClientboundGameParamsPacket.FromGameParams(Globals.G.GameParams);
+                gameParamsPacket.FastTravelAdvancesTime = fastTravelAdvancesTime;
+
+                SendPacket(peer, gameParamsPacket, DeliveryMethod.ReliableOrdered);
                 SendPacket(peer, ClientboundSaveGameDataPacket.CreatePacket(player), DeliveryMethod.ReliableOrdered);
 
                 break;
@@ -1393,6 +1412,14 @@ public class NetworkServer : NetworkManager
 
     private void OnServerboundTimeAdvancePacket(ServerboundTimeAdvancePacket packet, ITransportPeer peer)
     {
+
+        if (!fastTravelAdvancesTime)
+        {
+            TryGetServerPlayer(peer, out ServerPlayer player);
+            LogWarning($"Player {player?.Username} sent a TimeAdvance request, but FastTravelAdvancesTime is disabled");
+            return;
+        }
+
         SendPacketToAll
         (
             new ClientboundTimeAdvancePacket
