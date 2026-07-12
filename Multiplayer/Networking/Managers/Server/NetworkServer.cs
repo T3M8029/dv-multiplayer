@@ -38,6 +38,7 @@ using Multiplayer.Networking.Packets.Serverbound.Train;
 using Multiplayer.Networking.Packets.Unconnected;
 using Multiplayer.Networking.TransportLayers;
 using Multiplayer.Patches.MainMenu;
+using Multiplayer.Patches.World;
 using Multiplayer.Utils;
 using System;
 using System.Collections.Generic;
@@ -69,6 +70,7 @@ public class NetworkServer : NetworkManager
     public LobbyServerData ServerData;
     public RerailController rerailController;
 
+    private bool fastTravelAdvancesTime;
 
     public IReadOnlyCollection<ServerPlayer> ServerPlayers => serverPlayers.Values;
     public IReadOnlyCollection<ServerPlayerWrapper> ServerPlayerWrappers => PlayerWrapperCache.Values;
