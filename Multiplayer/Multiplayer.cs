@@ -10,6 +10,7 @@ using Multiplayer.API;
 using Multiplayer.Components.MainMenu;
 using Multiplayer.Components.Networking;
 using Multiplayer.Editor;
+using Multiplayer.Models;
 using Multiplayer.Patches.Mods;
 using Multiplayer.Patches.World;
 using System;
@@ -27,13 +28,15 @@ namespace Multiplayer;
 public static class Multiplayer
 {
     private const string LOG_FILE = "multiplayer.log";
+    private static APIProvider _apiProvider;
+    private static AssetBundle assetBundle;
 
     public static UnityModManager.ModEntry ModEntry;
     public static Settings Settings;
-    private static APIProvider _apiProvider;
 
-    private static AssetBundle assetBundle;
     public static AssetIndex AssetIndex { get; private set; }
+    public static PlayerModelRegistry PlayerModelRegistry { get; private set; }
+
     public static string Ver {
         get {
             AssemblyInformationalVersionAttribute info = (AssemblyInformationalVersionAttribute)typeof(Multiplayer).Assembly.
@@ -115,6 +118,7 @@ public static class Multiplayer
 
             TryLoadPersistentJobs();
 
+            Log("Loading Assets...");
             if (!LoadAssets())
                 return false;
 
@@ -122,6 +126,10 @@ public static class Multiplayer
             {
                 // Ensure the UnityChan assembly gets loaded.
             }
+
+            PlayerModelRegistry = new PlayerModelRegistry();
+            PlayerModelRegistry.Reload();
+
 
             Log("Creating NetworkManager...");
             NetworkLifecycle.CreateLifecycle();
@@ -173,6 +181,7 @@ public static class Multiplayer
         }
 
         AssetIndex = indices[0];
+
         return true;
     }
 
