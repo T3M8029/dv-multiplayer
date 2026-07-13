@@ -345,6 +345,8 @@ public class NetworkedStationController : IdMonoBehaviour<uint, NetworkedStation
             if (NetworkedJobs.Any(nj => nj.Job.ID == jobData.ID))
             {
                 Multiplayer.LogWarning($"Client already has job {jobData.ID}, not adding second copy");
+                DelayedJobs.Remove(jobData.NetID);
+                TimeoutJobs.Remove(jobData.NetID);
                 continue;
             }
 
@@ -567,6 +569,7 @@ public class NetworkedStationController : IdMonoBehaviour<uint, NetworkedStation
                 takenJobs.Add(netJob.Job);
 
                 netJob.Job.TakeJob(true); //take job as if loaded from save to prevent debt controller kicking in
+                SingletonBehaviour<JobsManager>.Instance.currentJobs.Add(netJob.Job);
 
                 if (canPrint)
                 {
@@ -584,7 +587,7 @@ public class NetworkedStationController : IdMonoBehaviour<uint, NetworkedStation
             case JobState.Completed:
                 takenJobs.Remove(netJob.Job);
                 completedJobs.Add(netJob.Job);
-                netJob.Job.CompleteJob();
+                SingletonBehaviour<JobsManager>.Instance.CompleteTheJob(netJob.Job);
 
                 if (canPrint)
                 {
@@ -605,12 +608,13 @@ public class NetworkedStationController : IdMonoBehaviour<uint, NetworkedStation
             case JobState.Abandoned:
                 takenJobs.Remove(netJob.Job);
                 abandonedJobs.Add(netJob.Job);
-                netJob.Job.AbandonJob();
+                SingletonBehaviour<JobsManager>.Instance.AbandonJob(netJob.Job);
                 UpdateCarPlates(netJob.JobCars, string.Empty);
                 break;
 
             case JobState.Expired:
                 netJob.Job.ExpireJob();
+                SingletonBehaviour<JobsManager>.Instance.currentJobs.Remove(netJob.Job);
                 netJob.DestroyJobOverview();
 
                 UpdateCarPlates(netJob.JobCars, string.Empty);

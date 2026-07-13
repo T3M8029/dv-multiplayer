@@ -106,6 +106,7 @@ public static class CarSpawner_Patch
 
         if (__result.TryNetworked(out var netTC))
         {
+            TrainStress.globalIgnoreStressCalculation = true;
             netTC.doNotUpdate = true;
             carIdsWithNoUpdates.Add(__result.ID);
             NetworkLifecycle.Instance.Server.SendSpawnTrainset([__result], false, true);
@@ -119,13 +120,22 @@ public static class CarSpawner_Patch
 
     private static IEnumerator AllowingCrasUpdatesCoro()
     {
-        yield return null;
+        try
+        {
+            allowingCrasUpdatesCoroRunning = true;
+            yield return null;
 
-        Multiplayer.LogDebug(() => $"CarSpawnerPatch: waiting with newly resumed car physics updates for all cars to resume");
-        yield return new WaitUntil(() => !((bool)Multiplayer.PersJobsResumeCoroRunningField?.GetValue(null) == true));
-        yield return WaitFor.SecondsRealtime(3f);
-        Multiplayer.LogDebug(() => $"CarSpawnerPatch: car resuming finished, will allow physics updates for cars {(string.Join(", ", carIdsWithNoUpdates))}");
+            Multiplayer.LogDebug(() => $"CarSpawnerPatch: waiting with newly resumed car physics updates for all cars to resume");
+            yield return new WaitUntil(() => !((bool)Multiplayer.PersJobsResumeCoroRunningField?.GetValue(null) == true));
+            yield return WaitFor.SecondsRealtime(3f);
+            Multiplayer.LogDebug(() => $"CarSpawnerPatch: car resuming finished, will allow physics updates for cars {(string.Join(", ", carIdsWithNoUpdates))}");
 
-        foreach (var tcId in carIdsWithNoUpdates) if (NetworkedTrainCar.GetFromTrainId(tcId, out var ntc)) ntc.doNotUpdate = false;
+            foreach (var tcId in carIdsWithNoUpdates) if (NetworkedTrainCar.GetFromTrainId(tcId, out var ntc)) ntc.doNotUpdate = false;
+        }
+        finally
+        {
+            TrainStress.globalIgnoreStressCalculation = false;
+            allowingCrasUpdatesCoroRunning = false;
+        }
     }
 }

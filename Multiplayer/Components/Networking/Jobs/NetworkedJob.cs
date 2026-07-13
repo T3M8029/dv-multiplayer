@@ -406,7 +406,7 @@ public class NetworkedJob : IdMonoBehaviour<ushort, NetworkedJob>
 
         if (Multiplayer.PersJobs)
         {
-            Multiplayer.PersJobsJobTrackChangedEventRegMethod.Invoke(null, OnJobTrackChengeEventRegistrator);
+            Multiplayer.PersJobsJobTrackChangedEventUnregMethod.Invoke(null, OnJobTrackChengeEventRegistrator);
             Multiplayer.PersJobsJobCarChangedEventUnregMethod.Invoke(null, OnJobCarChangedEventRegistrator);
             OnJobTrackChengeEventRegistrator = null;
             OnJobCarChangedEventRegistrator = null;

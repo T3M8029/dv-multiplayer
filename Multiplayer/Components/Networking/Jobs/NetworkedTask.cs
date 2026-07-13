@@ -57,7 +57,7 @@ public class NetworkedTask : IdMonoBehaviour<ushort, NetworkedTask>
                 .GetValue<IEnumerable<Task>>()
                 .Do(t => DoOnActualTask(t, action));
         }
-        action(task);
+        else action(task);
     }
 
     protected override bool IsIdServerAuthoritative => true;
