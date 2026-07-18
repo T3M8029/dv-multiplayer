@@ -160,7 +160,6 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
     public uint TicksSinceSync = uint.MaxValue;
 
     public uint lastTickProcessed = 0;
-    public bool HasPlayers => PlayerManager.Car == TrainCar || GetComponentInChildren<NetworkedPlayer>() != null;
 
     private Bogie bogie1;
     private Bogie bogie2;
@@ -208,6 +207,10 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
     private ServerPlayer frontInteractionPlayer;
     private ServerPlayer rearInteractionPlayer;
 
+    // Player tracking
+    private readonly HashSet<ServerPlayer> serverPlayersInCar = [];
+
+    // Control authority tracking
     private readonly Dictionary<uint, ServerPlayer> portAuthority = [];
 
     #endregion
@@ -220,7 +223,10 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
     public TickedQueue<BogieData> client_bogie1Queue;
     public TickedQueue<BogieData> client_bogie2Queue;
 
+    // Player tracking
+    private readonly HashSet<NetworkedPlayer> networkedPlayersInCar = [];
 
+    //Coupler interaction
     private Coupler couplerInteraction;
     private ChainCouplerInteraction.State originalState;
     private Coupler originalCoupledTo;
@@ -459,6 +465,10 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
 
             StartCoroutine(Server_WaitForLogicCar());
         }
+        else
+        {
+            NetworkLifecycle.Instance.Client.ClientPlayerManager.OnPlayerDisconnected += Client_PlayerDisconnected;
+        }
 
         NetworkLifecycle.Instance?.Client.SendTrainSyncRequest(NetId);
     }
@@ -683,6 +693,10 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
                 TrainCar.logicCar.CargoLoaded -= Server_OnCargoLoaded;
                 TrainCar.logicCar.CargoUnloaded -= Server_OnCargoUnloaded;
             }
+        }
+        else
+        {
+            NetworkLifecycle.Instance.Client.ClientPlayerManager.OnPlayerDisconnected -= Client_PlayerDisconnected;
         }
 
         CurrentID = string.Empty;
@@ -962,7 +976,7 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
                 $"rearInteracting: {rearInteracting}, rearInteractionPeer: {rearInteractionPlayer}"
                 );
 
-        //Ensure no one else is interacting
+        // Ensure no one else is interacting
         if (packet.IsFrontCoupler && frontInteracting && player != frontInteractionPlayer ||
            packet.IsFrontCoupler == false && rearInteracting && player != rearInteractionPlayer)
         {
@@ -1103,6 +1117,28 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
             portAuthority.Remove(kvp.Key);
             NetworkLifecycle.Instance.Server.SendTrainControlAuthorityUpdate(NetId, kvp.Key, ControlAuthorityState.Released);
         }
+
+        Server_RemovePlayer(player);
+    }
+
+    public void Server_PlayerOnCar(ServerPlayer player)
+    {
+        Multiplayer.LogDebug(() => $"Server_PlayerOnCar() {player?.Username} is on car {CurrentID}, netId: {NetId}, player.CarId: {player?.CarId}");
+        if (player == null || player.CarId == NetId)
+            return;
+
+        if (player.CarId != 0 && TryGet(player.CarId, out NetworkedTrainCar otherCar) && otherCar != null)
+            otherCar.Server_RemovePlayer(player);
+
+        serverPlayersInCar.Add(player);
+        TrainCar?.visitChecker?.OnPlayerCarChanged(TrainCar);
+    }
+
+    public void Server_RemovePlayer(ServerPlayer player)
+    {
+        Multiplayer.LogDebug(() => $"Server_RemovePlayer() {player?.Username} is leaving car {CurrentID}, netId: {NetId}, player.CarId: {player?.CarId}");
+        serverPlayersInCar.Remove(player);
+        TrainCar?.visitChecker?.OnPlayerCarChanged(TrainCar);
     }
     #endregion
 
@@ -1735,6 +1771,15 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
         targetPaint.UpdateTheme();
         TrainCar.OnPaintThemeChanged(targetPaint);
     }
+
+    public bool HasPlayers()
+    {
+        if (NetworkLifecycle.Instance.IsHost())
+            return PlayerManager.Car == TrainCar || serverPlayersInCar.Count > 0;
+
+        return PlayerManager.Car == TrainCar || networkedPlayersInCar.Count > 0;
+    }
+
     #endregion
 
     #region Client
@@ -2086,6 +2131,32 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
 
         if (handCarBarController != null)
             handCarBarController.enabled = shouldEnable;
+    }
+
+    public void Client_PlayerDisconnected(NetworkedPlayer player)
+    {
+        Multiplayer.LogDebug(() => $"Client_PlayerDisconnected({player?.Username}) car [{CurrentID}, {NetId}]");
+        networkedPlayersInCar.Remove(player);
+        TrainCar?.visitChecker?.OnPlayerCarChanged(TrainCar);
+    }
+
+    public void Client_PlayerOnCar(NetworkedPlayer player)
+    {
+        Multiplayer.LogDebug(() => $"Client_PlayerOnCar({player?.Username}) car [{CurrentID}, {NetId}], OccupiedCar: {player?.OccupiedCar?.CurrentID}");
+        if (player == null || player.OccupiedCar == TrainCar)
+            return;
+
+        player?.OccupiedCar?.Client_RemovePlayer(player);
+
+        networkedPlayersInCar.Add(player);
+        TrainCar?.visitChecker?.OnPlayerCarChanged(TrainCar);
+    }
+
+    public void Client_RemovePlayer(NetworkedPlayer player)
+    {
+        Multiplayer.LogDebug(() => $"Client_RemovePlayer({player?.Username}) car [{CurrentID}, {NetId}]");
+        networkedPlayersInCar.Remove(player);
+        TrainCar?.visitChecker?.OnPlayerCarChanged(TrainCar);
     }
     #endregion
 }

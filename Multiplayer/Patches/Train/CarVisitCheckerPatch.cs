@@ -25,30 +25,27 @@ public static class CarVisitCheckerPatch
         }
         if (NetworkLifecycle.Instance.Server.ServerPlayers.Count == 0)
         {
-
             //no server players (this should only apply to a dedicated server), don't despawn
             __instance.playerIsInCar = true;
             __result = true;
             return false;
         }
 
+        if (!NetworkedTrainCar.TryGetFromTrainCar(__instance.car, out NetworkedTrainCar netTC))
+        {
+            //Car was not found, allow it to despawn
+            __instance.playerIsInCar = false;
+            __result = false;
+            return false;
+        }
+
         //We are the host, check all players against this car
         foreach (ServerPlayer player in NetworkLifecycle.Instance.Server.ServerPlayers)
         {
-            if (NetworkedTrainCar.TryGetFromTrainCar(__instance.car, out NetworkedTrainCar netTC))
+            if (player.CarId == netTC.NetId)
             {
-                if (player.CarId == netTC.NetId)
-                {
-                    __instance.playerIsInCar = true;
-                    __result = true;
-                    return false;
-                }
-            }
-            else
-            {
-                //Car was not found, allow it to despawn
-                __instance.playerIsInCar = false;
-                __result = false;
+                __instance.playerIsInCar = true;
+                __result = true;
                 return false;
             }
         }
@@ -70,4 +67,31 @@ public static class CarVisitCheckerPatch
         return false;
     }
     */
+
+    [HarmonyPrefix]
+    [HarmonyPatch(nameof(CarVisitChecker.OnPlayerCarChanged))]
+    private static bool OnPlayerCarChanged_Prefix(CarVisitChecker __instance)
+    {
+        if (!NetworkedTrainCar.TryGetFromTrainCar(__instance.car, out NetworkedTrainCar netTC) || netTC == null)
+            return true;
+
+        if (netTC.HasPlayers())
+        {
+            __instance.playerIsInCar = true;
+            __instance.recentlyVisitedTimer.StopCountdown();
+        }
+        else
+        {
+            __instance.playerIsInCar = false;
+            __instance.recentlyVisitedTimer.StartCountdown(CarVisitChecker.RECENTLY_VISITED_TIME_THRESHOLD, CarVisitChecker.COUNTDOWN_TIME_UNIT);
+
+            if (__instance.propagateToFront)
+                __instance.VisitConnectedCars(__instance.car?.frontCoupler?.coupledTo);
+
+            if (__instance.propagateToRear)
+                __instance.VisitConnectedCars(__instance.car?.rearCoupler?.coupledTo);
+        }
+        return false;
+    }
+
 }

@@ -1406,6 +1406,17 @@ public class NetworkServer : NetworkManager
             return;
         }
 
+        // If the player's car has changed, remove the player from the old car
+        if (packet.CarID == 0 && player.CarId != 0)
+        {
+            if (NetworkedTrainCar.TryGet(player.CarId, out NetworkedTrainCar currentCar) && currentCar != null)
+                currentCar.Server_RemovePlayer(player);
+        }
+
+        // If the player is on a car, update the car's player list
+        if (packet.CarID != 0 && NetworkedTrainCar.TryGet(packet.CarID, out NetworkedTrainCar newCar) && newCar != null)
+            newCar.Server_PlayerOnCar(player);
+
         // Merge incoming delta into stored state
         player.TrackingData = player.TrackingData.MergeFrom(packet.TrackingData);
         player.CarId = packet.CarID;
@@ -1689,7 +1700,7 @@ public class NetworkServer : NetworkManager
         if (!NetworkedTrainCar.TryGet(packet.NetId, out NetworkedTrainCar networkedTrainCar))
             return;
 
-        if (networkedTrainCar.HasPlayers)
+        if (networkedTrainCar.HasPlayers())
         {
             LogWarning($"{player.Username} tried to delete a train with players in it!");
             return;
