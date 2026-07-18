@@ -8,6 +8,7 @@ using DV.MultipleUnit;
 using DV.Simulation.Brake;
 using DV.Simulation.Cars;
 using DV.Simulation.Controllers;
+using DV.Simulation.Fuses;
 using DV.ThingTypes;
 using JetBrains.Annotations;
 using LocoSim.Definitions;
@@ -24,6 +25,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using UnityEngine;
+using static DV.HUD.InteriorControlsManager;
 
 namespace Multiplayer.Components.Networking.Train;
 
@@ -106,6 +108,7 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
     private const float MAX_PAINT_DISTANCE_SQ = (CommsRadioPaintjob.SIGNAL_RANGE + DISTANCE_TOLERANCE) * (CommsRadioPaintjob.SIGNAL_RANGE + DISTANCE_TOLERANCE);
     private const float POSITION_UPDATE_THRESHOLD = 0.1f; // TrainCar must have a bigger delta to apply position update
     private const float INTERIOR_CONTROLS_TIMEOUT = 2f;
+    private const float IN_USE_THRESHOLD = 10 * 60f; // 10 minutes for in use to expire
 
     #region Port and Fuse Map
 
@@ -1780,6 +1783,99 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
         return PlayerManager.Car == TrainCar || networkedPlayersInCar.Count > 0;
     }
 
+    /// <summary>
+    /// Checks whether a train car is in use for the purposes of calling Work Trains.
+    /// TrainCar is considered in use if:
+    ///  - There are any players on the TrainCar or its connected carriages/locomotives.
+    ///  - The TrainCar is moving.
+    ///  - The TrainCar is connected to a train with one or more active jobs.
+    ///  - The TrainCar is connected to another locomotive with a running engine.
+    ///  - The TrainCar's engine (or equivalent) is running.
+    ///  - The TrainCar's handbrake is not applied.
+    ///  - The TrainCar's engine is off and brake applied, but has been occupied in the last 10 mins
+    /// </summary>
+    /// <returns></returns>
+    public bool InUse()
+    {
+        if (HasPlayers() || !TrainCar.isStationary)
+            return true;
+
+        if (TrainCar.IsLoco)
+            return LocoInUse();
+        else
+            return CarInUse();
+    }
+
+    private bool LocoInUse()
+    {
+        bool handbrakeApplied = brakeSystem?.handbrakePosition > 0f;
+        bool engineRunning = EngineRunning();
+
+        if (engineRunning || !handbrakeApplied)
+            return true;
+
+        // Check if the TrainCar has been occupied in the last n minutes
+        if ((TrainCar.visitChecker?.IsRecentlyVisited ?? false) &&
+            TrainCar.visitChecker?.recentlyVisitedTimer?.ElapsedTime < IN_USE_THRESHOLD)
+            return true;
+
+        if (TrainCar.trainset == null || TrainCar.trainset.cars == null || TrainCar.trainset.cars.Count == 0)
+            return false;
+
+        foreach (var otherTrainCar in TrainCar.trainset.cars)
+        {
+            if (otherTrainCar == null || otherTrainCar == TrainCar)
+                continue;
+
+            if (TryGetFromTrainCar(otherTrainCar, out var otherNetTrainCar) && otherNetTrainCar != null)
+                if (otherNetTrainCar.InUse())
+                    return true;
+        }
+
+        return false;
+    }
+
+    private bool CarInUse()
+    {
+        if (!TrainCar.IsLoco && TrainCar.logicCar != null)
+        {
+            var job = JobsManager.Instance.GetJobOfCar(TrainCar.logicCar, true);
+            if (job != null)
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Checks whether the train car's engine (or equivalent) is running.
+    /// TrainCars without an engine (e.g. electric locos) are considered to have a running engine if the main/electrics fuse is on.
+    /// </summary>
+    /// <returns>true if the engine is running, false otherwise</returns>
+    public bool EngineRunning()
+    {
+        if (!TrainCar.IsLoco)
+            return false;
+
+        // Steam and diesel locos have an engineOn reader port, electric locos do not
+        var engineReaderPort = simController?.controlsOverrider?.EngineOnReader?.engineOnPort;
+        if (engineReaderPort != null)
+        {
+            return engineReaderPort.Value > 0f;
+        }
+        else
+        {
+            // Attempt to get the state of the main/electrics fuse
+            if (interiorControlsManager?.TryGetControl(ControlType.ElectricsFuse, out var controlReference) ?? false)
+            {
+                var fuseFeeder = controlReference.controlImplBase.GetComponent<InteractableFuseFeeder>();
+                string fuseId = fuseFeeder?.fuseId;
+                simulationFlow.TryGetFuse(fuseId, out Fuse fuse);
+                return fuse?.State ?? false;
+            }
+        }
+        return false;
+    }
     #endregion
 
     #region Client
