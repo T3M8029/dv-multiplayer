@@ -34,5 +34,5 @@ public class ClientPlayerWrapper : IPlayer
     public bool IsHost => _isHost;
     public int Ping => _networkedPlayer.GetPing();
     public bool IsOnCar => _networkedPlayer.IsOnCar;
-    public TrainCar OccupiedCar => _networkedPlayer.OccupiedCar;
+    public TrainCar OccupiedCar => _networkedPlayer?.OccupiedCar?.TrainCar;
 }

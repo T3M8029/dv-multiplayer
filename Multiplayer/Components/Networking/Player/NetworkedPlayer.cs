@@ -70,7 +70,7 @@ public class NetworkedPlayer : MonoBehaviour
     }
 
     internal bool IsOnCar { get; private set; }
-    internal TrainCar OccupiedCar { get; private set; }
+    internal NetworkedTrainCar OccupiedCar { get; private set; }
 
     private Transform selfTransform;
     private PlayerPostureFlags currentPosture;
@@ -427,13 +427,29 @@ public class NetworkedPlayer : MonoBehaviour
 
     public void UpdateCar(ushort netId)
     {
-        IsOnCar = NetworkedTrainCar.TryGet(netId, out TrainCar trainCar);
-        OccupiedCar = trainCar;
+       bool willBeOnCar = NetworkedTrainCar.TryGet(netId, out NetworkedTrainCar newTrainCar);
+
+        if (OccupiedCar != null)
+        {
+            if (OccupiedCar == newTrainCar)
+                return;
+
+            OccupiedCar.Client_RemovePlayer(this);
+        }
+
+        IsOnCar = willBeOnCar && newTrainCar != null;
 
         if (IsOnCar)
+        {
+            OccupiedCar = newTrainCar;
             selfTransform.SetParent(OccupiedCar.transform, true);
+            OccupiedCar.Client_PlayerOnCar(this);
+        }
         else
+        {
+            OccupiedCar = null;
             selfTransform.SetParent(null, true);
+        }
     }
 
     /// <summary>

@@ -25,9 +25,9 @@ public static class CommsRadioCarDeleterPatch
 
         __instance.carToDelete.TryNetworked(out NetworkedTrainCar networkedTrainCar);
 
-        if (networkedTrainCar == null || networkedTrainCar != null && (networkedTrainCar.HasPlayers || networkedTrainCar.NetId == 0))
+        if (networkedTrainCar == null || networkedTrainCar != null && (networkedTrainCar.HasPlayers() || networkedTrainCar.NetId == 0))
         {
-            Multiplayer.LogDebug(() => $"CommsRadioCarDeleter unable to delete car: {__instance.carToDelete.name}, hasPlayer: {networkedTrainCar?.HasPlayers}, netId {networkedTrainCar?.NetId} ");
+            Multiplayer.LogDebug(() => $"CommsRadioCarDeleter unable to delete car: {__instance.carToDelete.name}, hasPlayer: {networkedTrainCar?.HasPlayers()}, netId {networkedTrainCar?.NetId} ");
             CommsRadioController.PlayAudioFromRadio(__instance.cancelSound, __instance.transform);
             __instance.ClearFlags();
             return false;
@@ -62,7 +62,7 @@ public static class CommsRadioCarDeleterPatch
         if (!Physics.Raycast(__instance.signalOrigin.position, __instance.signalOrigin.forward, out __instance.hit, CommsRadioCarDeleter.SIGNAL_RANGE, __instance.trainCarMask))
             return true;
         TrainCar car = TrainCar.Resolve(__instance.hit.transform.root);
-        if (car != null && car.TryNetworked(out NetworkedTrainCar networkedTrainCar) && !networkedTrainCar.HasPlayers)
+        if (car != null && car.TryNetworked(out NetworkedTrainCar networkedTrainCar) && !networkedTrainCar.HasPlayers())
             return true;
         __instance.PointToCar(null);
         return false;
