@@ -834,15 +834,12 @@ public class ServerBrowserPane : MonoBehaviour
 
         popup.labelTMPro.text = Locale.SERVER_BROWSER__PASSWORD;
 
-        //direct IP connection
+        // Direct IP connection
         if (direct)
         {
-            //Prefill with stored password
-            popup.GetComponentInChildren<TMP_InputField>().text = Multiplayer.Settings.LastRemotePassword;
-
-            //Set us up to allow a blank password
-            DestroyImmediate(popup.GetComponentInChildren<PopupTextInputFieldController>());
-            popup.GetOrAddComponent<PopupTextInputFieldControllerNoValidation>();
+            var fieldInputController = popup.GetComponentInChildren<PopupTextInputFieldController>();
+            fieldInputController.allowEmpty = true;
+            fieldInputController.field.text = Multiplayer.Settings.LastRemotePassword;
         }
 
         popup.Closed += result =>
@@ -857,7 +854,7 @@ public class ServerBrowserPane : MonoBehaviour
 
             if (direct)
             {
-                //store params for later
+                // Store params for later
                 Multiplayer.Settings.LastRemoteIP = address;
                 Multiplayer.Settings.LastRemotePort = portNumber;
                 Multiplayer.Settings.LastRemotePassword = result.data;
