@@ -1958,26 +1958,21 @@ public class NetworkServer : NetworkManager
     }
     private void OnServerboundJobValidateRequestPacket(ServerboundJobValidateRequestPacket packet, ITransportPeer peer)
     {
-        Log($"OnServerboundJobValidateRequestPacket(): {packet.JobNetId}");
+        if (!TryGetServerPlayer(peer, out ServerPlayer player))
+            return;
 
         if (!NetworkedJob.Get(packet.JobNetId, out NetworkedJob networkedJob))
         {
-            LogWarning($"OnServerboundJobValidateRequestPacket() NetworkedJob not found: {packet.JobNetId}");
+            LogWarning($"Received job validation request from {player.DisplayName}, but job with netId {packet.JobNetId} was not found.");
 
             SendPacket(peer, new ClientboundJobValidateResponsePacket { JobNetId = packet.JobNetId, Invalid = true }, DeliveryMethod.ReliableOrdered);
             return;
         }
 
-        if (!TryGetServerPlayer(peer, out ServerPlayer player))
-        {
-            LogWarning($"OnServerboundJobValidateRequestPacket() ServerPlayer not found: {peer.Id}");
-            return;
-        }
-
-        //Find the station and validator
+        // Find the station and validator
         if (!NetworkedStationController.Get(packet.StationNetId, out NetworkedStationController networkedStationController) || networkedStationController.JobValidator == null)
         {
-            LogWarning($"OnServerboundJobValidateRequestPacket() JobValidator not found. StationNetId: {packet.StationNetId}, StationController found: {networkedStationController != null}, JobValidator found: {networkedStationController?.JobValidator != null}");
+            LogWarning($"Received job validation request from {player.DisplayName} for job {networkedJob?.Job?.ID} at station with netId {packet.StationNetId}, StationController found: {networkedStationController != null}, JobValidator found: {networkedStationController?.JobValidator != null}");
             return;
         }
 
@@ -1985,11 +1980,31 @@ public class NetworkServer : NetworkManager
         switch (packet.validationType)
         {
             case ValidationType.JobOverview:
-                networkedStationController.JobValidator.ProcessJobOverview(networkedJob.JobOverview.GetTrackedItem<JobOverview>());
+                if (networkedJob.JobOverview == null)
+                {
+                    LogWarning($"Received job validation request from {player.DisplayName} for job {networkedJob?.Job?.ID} but JobOverview is null.");
+                    return;
+                }
+                var jobOverview = networkedJob.JobOverview.GetTrackedItem<JobOverview>();
+                if (jobOverview != null)
+                {
+                    networkedStationController.JobValidator.ProcessJobOverview(jobOverview);
+                    return;
+                }
                 break;
 
             case ValidationType.JobBooklet:
-                networkedStationController.JobValidator.ValidateJob(networkedJob.JobBooklet.GetTrackedItem<JobBooklet>());
+                if (networkedJob.JobBooklet == null)
+                {
+                    LogWarning($"Received job validation request from {player.DisplayName} for job {networkedJob?.Job?.ID} but JobBooklet is null.");
+                    return;
+                }
+                var jobBooklet = networkedJob.JobBooklet.GetTrackedItem<JobBooklet>();
+                if (jobBooklet != null)
+                {
+                    networkedStationController.JobValidator.ValidateJob(jobBooklet);
+                    return;
+                }
                 break;
         }
 
