@@ -80,8 +80,11 @@ public static class CarVisitCheckerPatch
             __instance.playerIsInCar = true;
             __instance.recentlyVisitedTimer.StopCountdown();
         }
-        else
+        else if (__instance.playerIsInCar)
         {
+            // if there was a player in the car, but now there isn't, start the countdown
+            // without this check, the countdown will be reset every time a player enters or leaves any car.
+
             __instance.playerIsInCar = false;
             __instance.recentlyVisitedTimer.StartCountdown(CarVisitChecker.RECENTLY_VISITED_TIME_THRESHOLD, CarVisitChecker.COUNTDOWN_TIME_UNIT);
 
