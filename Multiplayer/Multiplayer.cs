@@ -10,6 +10,7 @@ using Multiplayer.API;
 using Multiplayer.Components.MainMenu;
 using Multiplayer.Components.Networking;
 using Multiplayer.Editor;
+using Multiplayer.ModCompatibility;
 using Multiplayer.Models;
 using Multiplayer.Patches.Mods;
 using Multiplayer.Patches.World;
@@ -109,6 +110,7 @@ public static class Multiplayer
             harmony.PatchAll();
             SimComponent_Tick_Patch.Patch(harmony);
 
+            // Third Party Integrations
             UnityModManager.ModEntry remoteDispatch = UnityModManager.FindMod("RemoteDispatch");
             if (remoteDispatch?.Enabled == true)
             {
@@ -117,7 +119,9 @@ public static class Multiplayer
             }
 
             TryLoadPersistentJobs();
+            SkinManager.Initialize();
 
+          
             Log("Loading Assets...");
             if (!LoadAssets())
                 return false;
