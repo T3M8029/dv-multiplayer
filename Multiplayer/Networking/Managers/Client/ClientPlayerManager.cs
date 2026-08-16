@@ -17,12 +17,7 @@ public class ClientPlayerManager
     public Action<NetworkedPlayer> OnPlayerPrefsUpdated;
     public IReadOnlyCollection<NetworkedPlayer> Players => playerMap.Values;
 
-    private readonly GameObject playerTagPrefab;
-
-    public ClientPlayerManager()
-    {
-        playerTagPrefab = Multiplayer.AssetIndex.PlayerTag;
-    }
+    private GameObject playerTagPrefab => Multiplayer.AssetIndex.PlayerTag;
 
     public bool TryGetPlayer(byte playerid, out NetworkedPlayer player)
     {

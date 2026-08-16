@@ -52,6 +52,9 @@ public class CullingManager : IDisposable
 
     public void Dispose()
     {
+        if (UnloadWatcher.isUnloading)
+            return;
+
         if (checkCoro != null)
             CoroutineManager.Instance.Stop(checkCoro);
 
