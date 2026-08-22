@@ -4,6 +4,7 @@ using Multiplayer.Components.Networking.Train;
 using Multiplayer.Editor.Components.Player;
 using Multiplayer.Networking.Data.Player;
 using System.Collections.Generic;
+using UnityChan;
 using UnityEngine;
 
 namespace Multiplayer.Components.Networking.Player;
@@ -122,6 +123,8 @@ public class NetworkedPlayer : MonoBehaviour
     private Vector3? itemHoldPos;
     private Quaternion? itemHoldRot;
 
+    WindPhysicsController windController;
+
     protected void Awake()
     {
         nameTag = GetComponentInChildren<NameTag>();
@@ -184,10 +187,15 @@ public class NetworkedPlayer : MonoBehaviour
             leftHandTransform = null;
             rightHandTransform = null;
             handTrackingInitialized = false;
+            windController = null;
         }
 
         playerModel = Instantiate(newModel, transform);
         animationHandler = playerModel.GetComponent<AnimationHandler>();
+
+        // If the model is using wind physics, e.g. for hair, add the WindPhysicsController to manage effects on and off the car
+        if (playerModel.GetComponentInChildren<SpringManager>(true) != null)
+            windController = playerModel.AddComponent<WindPhysicsController>();
 
         var animator = playerModel.GetComponentInChildren<Animator>(true);
         if (animator != null)
@@ -441,7 +449,7 @@ public class NetworkedPlayer : MonoBehaviour
 
     public void UpdateCar(ushort netId)
     {
-       bool willBeOnCar = NetworkedTrainCar.TryGet(netId, out NetworkedTrainCar newTrainCar);
+        bool willBeOnCar = NetworkedTrainCar.TryGet(netId, out NetworkedTrainCar newTrainCar);
 
         if (OccupiedCar != null)
         {
@@ -449,6 +457,7 @@ public class NetworkedPlayer : MonoBehaviour
                 return;
 
             OccupiedCar.Client_RemovePlayer(this);
+            windController?.SetOnCar(null);
         }
 
         IsOnCar = willBeOnCar && newTrainCar != null;
@@ -458,6 +467,7 @@ public class NetworkedPlayer : MonoBehaviour
             OccupiedCar = newTrainCar;
             selfTransform.SetParent(OccupiedCar.transform, true);
             OccupiedCar.Client_PlayerOnCar(this);
+            windController?.SetOnCar(newTrainCar.TrainCar);
         }
         else
         {
