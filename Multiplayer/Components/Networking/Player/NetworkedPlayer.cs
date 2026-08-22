@@ -125,6 +125,22 @@ public class NetworkedPlayer : MonoBehaviour
 
     WindPhysicsController windController;
 
+    private bool isCulled;
+    public bool IsCulled
+    {
+        get => isCulled;
+        set
+        {
+            if (isCulled == value)
+                return;
+
+            isCulled = value;
+
+            playerModel?.SetActive(!value);
+            nameTag?.gameObject.SetActive(!value);
+        }
+    }
+
     protected void Awake()
     {
         nameTag = GetComponentInChildren<NameTag>();
@@ -236,6 +252,9 @@ public class NetworkedPlayer : MonoBehaviour
             headBaseWorldRotation = Quaternion.Inverse(selfTransform.rotation) * headTransform.rotation;
 
         SetPosture(currentPosture);
+
+        if (IsCulled)
+            playerModel.SetActive(false);
     }
 
     public void SetPing(int ping)
@@ -251,6 +270,17 @@ public class NetworkedPlayer : MonoBehaviour
 
     protected void Update()
     {
+        if (IsCulled)
+        {
+            if (IsOnCar)
+                selfTransform.localPosition = targetPos;
+            else
+                selfTransform.position = targetPos + WorldMover.currentMove;
+
+            selfTransform.rotation = targetRotation;
+            return;
+        }
+
         float t = Time.deltaTime * LERP_SPEED;
 
         Vector3 position = Vector3.Lerp(
@@ -314,6 +344,9 @@ public class NetworkedPlayer : MonoBehaviour
     /// </summary>
     protected void LateUpdate()
     {
+        if (IsCulled)
+            return;
+
         if (!IsVR)
         {
             float targetLeanAngle = 0f;
