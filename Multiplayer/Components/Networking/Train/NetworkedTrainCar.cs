@@ -630,6 +630,8 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
 
     public void OnDisable()
     {
+        bool unloading = UnloadWatcher.isUnloading;
+
         if (UnloadWatcher.isQuitting)
             return;
 
@@ -638,21 +640,22 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
         trainCarIdToNetworkedTrainCars.Remove(CurrentID);
         trainCarIdToTrainCars.Remove(CurrentID);
 
-        foreach (Coupler coupler in TrainCar.couplers)
-            hoseToCoupler.Remove(coupler.hoseAndCock);
+        if (TrainCar?.couplers != null)
+            foreach (Coupler coupler in TrainCar.couplers)
+                hoseToCoupler.Remove(coupler.hoseAndCock);
 
         //stop tracking client events
         NetworkLifecycle.Instance.OnTick -= Common_OnTick;
 
         if (firebox != null)
         {
-            firebox.fireboxCoalControlPort.ValueUpdatedInternally -= Client_OnFireboxAddCoal;   //Player adding coal
-            firebox.fireboxIgnitionPort.ValueUpdatedInternally -= Client_OnIgnite;      //Player igniting firebox
+            firebox.fireboxCoalControlPort.ValueUpdatedInternally -= Client_OnFireboxAddCoal;
+            firebox.fireboxIgnitionPort.ValueUpdatedInternally -= Client_OnIgnite;
         }
 
         if (coalPile != null)
         {
-            coalPile.coalConsumePort.ValueUpdatedInternally -= Client_OnCoalPileInteraction; //Coal being added/removed by shovel or feeder
+            coalPile.coalConsumePort.ValueUpdatedInternally -= Client_OnCoalPileInteraction;
         }
 
         if (brakeSystem != null)
@@ -670,15 +673,25 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
         if (NetworkLifecycle.Instance.IsHost())
         {
             NetworkLifecycle.Instance.OnTick -= Server_OnTick;
-            NetworkLifecycle.Instance.Server.PlayerDisconnected -= Server_OnPlayerDisconnect;
 
-            bogie1.TrackChanged -= Server_BogieTrackChanged;
-            bogie2.TrackChanged -= Server_BogieTrackChanged;
+            if (NetworkLifecycle.Instance.Server != null)
+                NetworkLifecycle.Instance.Server.PlayerDisconnected -= Server_OnPlayerDisconnect;
 
-            TrainCar.frontCoupler.Uncoupled -= Server_CouplerUncoupled;
-            TrainCar.rearCoupler.Uncoupled -= Server_CouplerUncoupled;
+            if (bogie1 != null)
+                bogie1.TrackChanged -= Server_BogieTrackChanged;
+            if (bogie2 != null)
+                bogie2.TrackChanged -= Server_BogieTrackChanged;
 
-            TrainCar.CarDamage.CarEffectiveHealthStateUpdate -= Server_CarHealthUpdate;
+            if (TrainCar?.frontCoupler != null)
+                TrainCar.frontCoupler.Uncoupled -= Server_CouplerUncoupled;
+            if (TrainCar?.rearCoupler != null)
+                TrainCar.rearCoupler.Uncoupled -= Server_CouplerUncoupled;
+
+            if (TrainCar?.CargoDamage != null)
+            {
+                TrainCar.CargoDamage.CargoEffectiveHealthStateUpdate -= Server_CargoHealthUpdate;
+                TrainCar.CarDamage.CarEffectiveHealthStateUpdate -= Server_CarHealthUpdate;
+            }
 
             //Unsubscribe from damage updates
             if (trainDamageDelegates != null && lastSentTrainDamages.Count > 0)
@@ -688,10 +701,12 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
             if (brakeSystem != null)
             {
                 brakeSystem.MainResPressureChanged -= Server_MainResUpdate;
-                brakeSystem.heatController.OverheatingActiveStateChanged -= Server_BrakeHeatUpdate;
+
+                if (brakeSystem.heatController != null)
+                    brakeSystem.heatController.OverheatingActiveStateChanged -= Server_BrakeHeatUpdate;
             }
 
-            if (TrainCar.logicCar != null)
+            if (TrainCar?.logicCar != null)
             {
                 TrainCar.logicCar.CargoLoaded -= Server_OnCargoLoaded;
                 TrainCar.logicCar.CargoUnloaded -= Server_OnCargoUnloaded;
@@ -699,11 +714,25 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
         }
         else
         {
-            NetworkLifecycle.Instance.Client.ClientPlayerManager.OnPlayerDisconnected -= Client_PlayerDisconnected;
+            if (NetworkLifecycle.Instance.Client != null && NetworkLifecycle.Instance.Client.ClientPlayerManager != null)
+                NetworkLifecycle.Instance.Client.ClientPlayerManager.OnPlayerDisconnected -= Client_PlayerDisconnected;
         }
 
         CurrentID = string.Empty;
-        Destroy(this);
+
+        try
+        {
+            Destroy(this);
+        }
+        catch {}
+
+        if (UnloadWatcher.isUnloading)
+        {
+            trainCarsToNetworkedTrainCars.Clear();
+            trainCarIdToNetworkedTrainCars.Clear();
+            trainCarIdToTrainCars.Clear();
+            hoseToCoupler.Clear();
+        }
     }
 
     #region Server
@@ -2176,7 +2205,7 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
 
         try
         {
-            while (!Mathf.Approximately(control.Value, oldValue))
+            while (!UnloadWatcher.isUnloading && !Mathf.Approximately(control.Value, oldValue))
             {
                 oldValue = control.Value;
                 yield return new WaitForSecondsRealtime(0.5f);
