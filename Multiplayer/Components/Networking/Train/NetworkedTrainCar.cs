@@ -1823,56 +1823,131 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
     ///  - The TrainCar's handbrake is not applied.
     ///  - The TrainCar's engine is off and brake applied, but has been occupied in the last 10 mins
     /// </summary>
-    /// <returns></returns>
-    public bool InUse()
+    /// <param name="reason">The reason the TrainCar is in use</param>
+    /// <param name="timeout">The time remaining until the TrainCar is no longer considered in use</param>
+    /// <returns>True if the train car is in use, false otherwise</returns>
+    public bool InUse(out LocoInUseData.LocoInUseReason reason, out float timeout)
     {
-        if (HasPlayers() || !TrainCar.isStationary)
-            return true;
-
-        if (TrainCar.IsLoco)
-            return LocoInUse();
-        else
-            return CarInUse();
+        HashSet<NetworkedTrainCar> visited = new(TrainCar?.trainset?.cars?.Count ?? 1);
+        return InUse(out reason, out timeout, visited);
     }
 
-    private bool LocoInUse()
+    /// <summary>
+    /// Internal implementation of InUse() that tracks visited cars to avoid infinite recursion when checking connected cars.
+    /// </summary>
+    /// <param name="reason">The reason the TrainCar is in use</param>
+    /// <param name="timeout">The time remaining until the TrainCar is no longer considered in use</param>
+    /// <param name="visited">A set of already visited NetworkedTrainCar instances to avoid infinite recursion</param>
+    /// <returns>True if the train car is in use, false otherwise</returns>
+    private bool InUse(out LocoInUseData.LocoInUseReason reason, out float timeout, HashSet<NetworkedTrainCar> visited)
     {
-        bool handbrakeApplied = brakeSystem?.handbrakePosition > 0f;
-        bool engineRunning = EngineRunning();
+        timeout = 0f;
 
-        if (engineRunning || !handbrakeApplied)
-            return true;
-
-        // Check if the TrainCar has been occupied in the last n minutes
-        if ((TrainCar.visitChecker?.IsRecentlyVisited ?? false) &&
-            TrainCar.visitChecker?.recentlyVisitedTimer?.ElapsedTime < IN_USE_THRESHOLD)
-            return true;
-
-        if (TrainCar.trainset == null || TrainCar.trainset.cars == null || TrainCar.trainset.cars.Count == 0)
-            return false;
-
-        foreach (var otherTrainCar in TrainCar.trainset.cars)
+        if (!visited.Add(this))
         {
-            if (otherTrainCar == null || otherTrainCar == TrainCar)
-                continue;
-
-            if (TryGetFromTrainCar(otherTrainCar, out var otherNetTrainCar) && otherNetTrainCar != null)
-                if (otherNetTrainCar.InUse())
-                    return true;
+            //Multiplayer.LogDebug(() => $"InUse() [{CurrentID}, {NetId}] already visited, reason: None");
+            reason = LocoInUseData.LocoInUseReason.None;
+            return false;
         }
 
+        //Multiplayer.LogDebug(() => $"InUse() called for [{CurrentID}, {NetId}]");
+        // Common checks for all TrainCars
+        if (!TrainCar.isStationary)
+        {
+            //Multiplayer.LogDebug(() => $"InUse() [{CurrentID}, {NetId}] is moving, reason: Moving");
+            reason = LocoInUseData.LocoInUseReason.Moving;
+            return true;
+        }
+
+        if (HasPlayers())
+        {
+            //Multiplayer.LogDebug(() => $"InUse() [{CurrentID}, {NetId}] has players, reason: Occupied");
+            reason = LocoInUseData.LocoInUseReason.Occupied;
+            return true;
+        }
+
+        bool handbrakeApplied = TrainCar.carType == TrainCarType.HandCar ||
+                                brakeSystem?.handbrakePosition > 0f;
+        if (!handbrakeApplied)
+        {
+            //Multiplayer.LogDebug(() => $"InUse() [{CurrentID}, {NetId}] handbrake not applied, reason: Brakes");
+            reason = LocoInUseData.LocoInUseReason.Brakes;
+            return true;
+        }
+
+        // Specific checks for locomotives and carriages
+        bool result;
+        if (TrainCar.IsLoco)
+            result = LocoInUse(out reason, out timeout);
+        else
+            result = CarInUse(out reason);
+
+        if (!result && OtherCarInUse(visited))
+        {
+            //Multiplayer.LogDebug(() => $"InUse() [{CurrentID}, {NetId}] other car in use");
+            reason = LocoInUseData.LocoInUseReason.CoupledCarInUse;
+            return true;
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Checks whether a locomotive is in use for the purposes of calling Work Trains.
+    /// </summary>
+    /// <param name="reason">The reason the locomotive is in use</param>
+    /// <param name="timeout">The time remaining until the locomotive is no longer considered in use</param>
+    /// <returns>True if the locomotive is in use, false otherwise</returns>
+    private bool LocoInUse(out LocoInUseData.LocoInUseReason reason, out float timeout)
+    {
+        timeout = 0f;
+
+        bool engineRunning = EngineRunning();
+
+        if (engineRunning)
+        {
+            //Multiplayer.LogDebug(() => $"LocoInUse() [{CurrentID}, {NetId}] engine running, reason: Engine");
+            reason = LocoInUseData.LocoInUseReason.Engine;
+            return true;
+        }
+
+        // Check if the TrainCar has been occupied in the last n minutes
+        float elapsedTime = TrainCar.visitChecker?.recentlyVisitedTimer?.ElapsedTime ?? 0f;
+        if ((TrainCar.visitChecker?.IsRecentlyVisited ?? false) &&
+            TrainCar.visitChecker?.recentlyVisitedTimer?.ElapsedTime < IN_USE_THRESHOLD)
+        {
+            timeout = IN_USE_THRESHOLD - elapsedTime;
+            reason = LocoInUseData.LocoInUseReason.Timeout;
+            var tempTimeout = timeout;
+            //Multiplayer.LogDebug(() => $"LocoInUse() [{CurrentID}, {NetId}] recently visited, reason: Timeout, timeout: {tempTimeout}");
+            return true;
+        }
+
+        //Multiplayer.LogDebug(() => $"LocoInUse() [{CurrentID}, {NetId}] no other train cars in use, reason: None");
+        reason = LocoInUseData.LocoInUseReason.None;
         return false;
     }
 
-    private bool CarInUse()
+    /// <summary>
+    /// Checks whether a non-locomotive train car is in use for the purposes of calling Work Trains.
+    /// </summary>
+    /// <param name="reason">The reason the TrainCar is in use</param>
+    /// <returns>True if the car is in use, false otherwise</returns>
+    private bool CarInUse(out LocoInUseData.LocoInUseReason reason)
     {
         if (!TrainCar.IsLoco && TrainCar.logicCar != null)
         {
             var job = JobsManager.Instance.GetJobOfCar(TrainCar.logicCar, true);
             if (job != null)
+            {
+                //Multiplayer.LogDebug(() => $"CarInUse() [{CurrentID}, {NetId}] is part of job [{job.ID}]");
+                reason = LocoInUseData.LocoInUseReason.Job;
                 return true;
+            }
         }
 
+        //Multiplayer.LogDebug(() => $"CarInUse() [{CurrentID}, {NetId}] no jobs found, reason: None");
+        reason = LocoInUseData.LocoInUseReason.None;
         return false;
     }
 
@@ -1880,7 +1955,7 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
     /// Checks whether the train car's engine (or equivalent) is running.
     /// TrainCars without an engine (e.g. electric locos) are considered to have a running engine if the main/electrics fuse is on.
     /// </summary>
-    /// <returns>true if the engine is running, false otherwise</returns>
+    /// <returns>True if the engine is running, false otherwise</returns>
     public bool EngineRunning()
     {
         if (!TrainCar.IsLoco)
@@ -1903,6 +1978,34 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
                 return fuse?.State ?? false;
             }
         }
+        return false;
+    }
+
+    /// <summary>
+    /// Checks whether any other train cars in the same trainset are in use for the purposes of calling Work Trains.
+    /// </summary>
+    /// <param name="visited"></param>
+    /// <returns>True if a coupled car is in use, false otherwise</returns>
+    private bool OtherCarInUse(HashSet<NetworkedTrainCar> visited)
+    {
+        //Multiplayer.LogDebug(() => $"OtherCarInUse() called for [{CurrentID}, {NetId}]");
+
+        if (TrainCar.trainset == null || TrainCar.trainset.cars == null || TrainCar.trainset.cars.Count == 0)
+        {
+            //Multiplayer.LogDebug(() => $"OtherCarInUse() [{CurrentID}, {NetId}] trainset is null or empty, reason: None");
+            return false;
+        }
+
+        foreach (var otherTrainCar in TrainCar.trainset.cars)
+        {
+            if (otherTrainCar == null || otherTrainCar == TrainCar)
+                continue;
+
+            if (TryGetFromTrainCar(otherTrainCar, out var otherNetTrainCar) && otherNetTrainCar != null)
+                if (otherNetTrainCar.InUse(out _, out _, visited))
+                    return true;
+        }
+
         return false;
     }
     #endregion
