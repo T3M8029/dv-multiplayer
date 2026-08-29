@@ -724,7 +724,7 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
         {
             Destroy(this);
         }
-        catch {}
+        catch { }
 
         if (UnloadWatcher.isUnloading)
         {
@@ -1131,7 +1131,7 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
         //todo: resolve player disconnection during chain interaction
         if (frontInteractionPlayer == player || rearInteractionPlayer == player)
         {
-            Multiplayer.LogWarning($"Server_OnPlayerDisconnect() Coupler interaction in unknown state [{CurrentID}, {NetId}] isFront: {frontInteractionPlayer == player}");
+            //Multiplayer.LogWarning($"Server_OnPlayerDisconnect() Coupler interaction in unknown state [{CurrentID}, {NetId}] isFront: {frontInteractionPlayer == player}");
             if (frontInteractionPlayer == player)
             {
                 frontInteracting = false;
@@ -1155,7 +1155,7 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
 
     public void Server_PlayerOnCar(ServerPlayer player)
     {
-        Multiplayer.LogDebug(() => $"Server_PlayerOnCar() {player?.Username} is on car {CurrentID}, netId: {NetId}, player.CarId: {player?.CarId}");
+        //Multiplayer.LogDebug(() => $"Server_PlayerOnCar() {player?.Username} is on car {CurrentID}, netId: {NetId}, player.CarId: {player?.CarId}");
         if (player == null || player.CarId == NetId)
             return;
 
@@ -1168,7 +1168,7 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
 
     public void Server_RemovePlayer(ServerPlayer player)
     {
-        Multiplayer.LogDebug(() => $"Server_RemovePlayer() {player?.Username} is leaving car {CurrentID}, netId: {NetId}, player.CarId: {player?.CarId}");
+        //Multiplayer.LogDebug(() => $"Server_RemovePlayer() {player?.Username} is leaving car {CurrentID}, netId: {NetId}, player.CarId: {player?.CarId}");
         serverPlayersInCar.Remove(player);
         TrainCar?.visitChecker?.OnPlayerCarChanged(TrainCar);
     }
@@ -1331,7 +1331,7 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
         //Multiplayer.LogDebug(() => $"Common_OnPortUpdated() port [{port?.id}] updated on [{CurrentID}, {NetId}]. Value: {port?.Value}, PrevValue: {port?.prevValue}, ValueType: {port?.valueType}, Tick: {NetworkLifecycle.Instance.Tick}");
         if (port.valueType != PortValueType.CONTROL && !NetworkLifecycle.Instance.IsHost())
         {
-            Multiplayer.LogDebug(() => $"Common_OnPortUpdated() Ignoring non-control port update for [{port.id}] on [{CurrentID}, {NetId}]");
+            //Multiplayer.LogDebug(() => $"Common_OnPortUpdated() Ignoring non-control port update for [{port.id}] on [{CurrentID}, {NetId}]");
             return;
         }
 
@@ -2316,7 +2316,7 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
         }
         finally
         {
-            Multiplayer.LogDebug(() => $"WaitForControlToSettle() Control [{control.name}, {portNetId}], releasing authority for car {CurrentID} after {Time.time - time}");
+            Multiplayer.LogDebug(() => $"WaitForControlToSettle() Control [{control?.name}, {portNetId}], releasing authority for car {CurrentID} after {Time.time - time}");
             NetworkLifecycle.Instance.Client?.SendTrainControlAuthorityRequest(NetId, portNetId, false);
         }
     }
