@@ -2114,7 +2114,7 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
         TrainCar.rb.isKinematic = wasKinematicBeforeHardCorrection;
         kinematicCycles = 0;
 
-        Client_ReceiveTrainPhysicsUpdate(movementPart, tick);
+        Client_ReceiveTrainPhysicsUpdate(in movementPart, tick);
     }
 
     public void Client_ReceiveTrainPhysicsUpdate(in TrainsetMovementPart movementPart, uint tick)
