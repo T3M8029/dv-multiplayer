@@ -1839,7 +1839,11 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
     public bool InUse(out LocoInUseData.LocoInUseReason reason, out float timeout)
     {
         HashSet<NetworkedTrainCar> visited = new(TrainCar?.trainset?.cars?.Count ?? 1);
-        return InUse(out reason, out timeout, visited);
+
+        // Derailed demos shouldn't be blocked if brakes aren't applied
+        bool isDerailed = TrainCar.derailed && TrainCar.playerSpawnedCar;
+        //Multiplayer.LogDebug(() => $"InUse() [{CurrentID}, {NetId}] isDerailed: {isDerailed}, derailed: {TrainCar.derailed}, playerSpawnedCar: {TrainCar.playerSpawnedCar}");
+        return InUse(isDerailed, out reason, out timeout, visited);
     }
 
     /// <summary>
@@ -1849,7 +1853,7 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
     /// <param name="timeout">The time remaining until the TrainCar is no longer considered in use</param>
     /// <param name="visited">A set of already visited NetworkedTrainCar instances to avoid infinite recursion</param>
     /// <returns>True if the train car is in use, false otherwise</returns>
-    private bool InUse(out LocoInUseData.LocoInUseReason reason, out float timeout, HashSet<NetworkedTrainCar> visited)
+    private bool InUse(bool isDerailed, out LocoInUseData.LocoInUseReason reason, out float timeout, HashSet<NetworkedTrainCar> visited)
     {
         timeout = 0f;
 
@@ -1878,21 +1882,23 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
 
         bool handbrakeApplied = TrainCar.carType == TrainCarType.HandCar ||
                                 brakeSystem?.handbrakePosition > 0f;
-        if (!handbrakeApplied)
+        if (!handbrakeApplied && !isDerailed)
         {
-            //Multiplayer.LogDebug(() => $"InUse() [{CurrentID}, {NetId}] handbrake not applied, reason: Brakes");
+            //Multiplayer.LogDebug(() => $"InUse() [{CurrentID}, {NetId}] handbrake not applied, reason: Brakes isDerailed: {isDerailed}");
             reason = LocoInUseData.LocoInUseReason.Brakes;
             return true;
         }
 
         // Specific checks for locomotives and carriages
-        bool result;
+        bool result = false;
         if (TrainCar.IsLoco)
-            result = LocoInUse(out reason, out timeout);
-        else
+            result = LocoInUse(isDerailed, out reason, out timeout);
+        else if (!isDerailed)
             result = CarInUse(out reason);
+        else
+            reason = LocoInUseData.LocoInUseReason.None;
 
-        if (!result && OtherCarInUse(visited))
+        if (!result && !isDerailed && OtherCarInUse(isDerailed, visited))
         {
             //Multiplayer.LogDebug(() => $"InUse() [{CurrentID}, {NetId}] other car in use");
             reason = LocoInUseData.LocoInUseReason.CoupledCarInUse;
@@ -1908,13 +1914,13 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
     /// <param name="reason">The reason the locomotive is in use</param>
     /// <param name="timeout">The time remaining until the locomotive is no longer considered in use</param>
     /// <returns>True if the locomotive is in use, false otherwise</returns>
-    private bool LocoInUse(out LocoInUseData.LocoInUseReason reason, out float timeout)
+    private bool LocoInUse(bool isDerailed, out LocoInUseData.LocoInUseReason reason, out float timeout)
     {
         timeout = 0f;
 
         bool engineRunning = EngineRunning();
 
-        if (engineRunning)
+        if (engineRunning && !isDerailed)
         {
             //Multiplayer.LogDebug(() => $"LocoInUse() [{CurrentID}, {NetId}] engine running, reason: Engine");
             reason = LocoInUseData.LocoInUseReason.Engine;
@@ -1996,7 +2002,7 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
     /// </summary>
     /// <param name="visited"></param>
     /// <returns>True if a coupled car is in use, false otherwise</returns>
-    private bool OtherCarInUse(HashSet<NetworkedTrainCar> visited)
+    private bool OtherCarInUse(bool isDerailed, HashSet<NetworkedTrainCar> visited)
     {
         //Multiplayer.LogDebug(() => $"OtherCarInUse() called for [{CurrentID}, {NetId}]");
 
@@ -2012,7 +2018,7 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
                 continue;
 
             if (TryGetFromTrainCar(otherTrainCar, out var otherNetTrainCar) && otherNetTrainCar != null)
-                if (otherNetTrainCar.InUse(out _, out _, visited))
+                if (otherNetTrainCar.InUse(isDerailed, out _, out _, visited))
                     return true;
         }
 
