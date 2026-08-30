@@ -26,6 +26,7 @@ using System.Linq;
 using System.Reflection;
 using UnityEngine;
 using static DV.HUD.InteriorControlsManager;
+using static Multiplayer.Networking.Data.Train.RigidbodySnapshot;
 
 namespace Multiplayer.Components.Networking.Train;
 
@@ -235,6 +236,7 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
     private Coupler originalCoupledTo;
 
     private uint kinematicCycles = 0;
+    private bool wasKinematicBeforeHardCorrection = false;
 
     private readonly Dictionary<uint, bool> portNetIdToBlockState = [];
     private readonly Dictionary<uint, ControlImplBase> portNetIdToControl = [];
@@ -2020,6 +2022,85 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
             yield return null;
 
         Client_Initialized = true;
+    }
+
+    /// <summary>
+    /// Checks whether the received position exceeds the threshold for a simple position update.
+    /// </summary>
+    /// <param name="movementPart">The movement part containing the position and movement data.</param>
+    /// <param name="tick">The tick at which the update was received.</param>
+    /// <returns>Returns true if a hard correction is required, false otherwise.</returns>
+    public bool Client_CheckThreshold(in TrainsetMovementPart movementPart, uint tick)
+    {
+        if (tick <= lastTickProcessed)
+            return false;
+
+        if (movementPart.typeFlag.HasFlag(TrainsetMovementPart.MovementType.Position))
+        {
+            Vector3 worldPos = movementPart.Position + WorldMover.currentMove;
+
+            // Only apply position update if change exceeds threshold (stops cariages from jittering while stationary)
+            float positionDelta = Vector3.Distance(TrainCar.transform.position, worldPos);
+
+            if (positionDelta > NetworkTrainsetWatcher.MAX_POSITION_DELTA)
+            {
+                Multiplayer.LogDebug(() => $"Client_CheckThreshold() Position delta {positionDelta} exceeds threshold for car {CurrentID} at tick {tick}, current position: {TrainCar.transform.position}, expected position: {worldPos}");
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public void Client_BeginHardCorrection(in TrainsetMovementPart movementPart, uint tick)
+    {
+        if (!Client_Initialized || TrainCar.rb == null)
+            return;
+
+        wasKinematicBeforeHardCorrection = TrainCar.rb.isKinematic;
+
+        TrainCar.rb.isKinematic = true;
+        TrainCar.rb.velocity = Vector3.zero;
+        TrainCar.rb.angularVelocity = Vector3.zero;
+
+        if (movementPart.typeFlag == TrainsetMovementPart.MovementType.RigidBody)
+        {
+            if (TrainCar.isEligibleForSleep)
+                TrainCar.ForceOptimizationState(false);
+
+            if (!TrainCar.derailed)
+                TrainCar.Derail();
+
+            IncludedData flags = (IncludedData)movementPart.RigidbodySnapshot.IncludedDataFlags;
+
+            if (flags.HasFlag(IncludedData.Position))
+                TrainCar.rb.position = movementPart.RigidbodySnapshot.Position + WorldMover.currentMove;
+            if (flags.HasFlag(IncludedData.Rotation))
+                TrainCar.rb.rotation = movementPart.RigidbodySnapshot.Rotation;
+        }
+        else if (movementPart.typeFlag.HasFlag(TrainsetMovementPart.MovementType.Position))
+        {
+            TrainCar.rb.position = movementPart.Position + WorldMover.currentMove;
+            TrainCar.rb.rotation = movementPart.Rotation;
+        }
+
+        // Clear anything queued so stale interpolation data doesn't fight the new state
+        Client_trainSpeedQueue.Clear();
+        Client_trainRigidbodyQueue.Clear();
+        client_bogie1Queue.Clear();
+        client_bogie2Queue.Clear();
+        TrainCar.stress.ResetTrainStress();
+    }
+
+    public void Client_EndHardCorrection(in TrainsetMovementPart movementPart, uint tick)
+    {
+        if (!Client_Initialized || TrainCar.rb == null)
+            return;
+
+        TrainCar.rb.isKinematic = wasKinematicBeforeHardCorrection;
+        kinematicCycles = 0;
+
+        Client_ReceiveTrainPhysicsUpdate(movementPart, tick);
     }
 
     public void Client_ReceiveTrainPhysicsUpdate(in TrainsetMovementPart movementPart, uint tick)
