@@ -254,40 +254,59 @@ public static class Multiplayer
 
     #region Logging
 
-    public static void LogDebug(Func<object> resolver)
+    public static void LogDebug(Func<object> resolver, bool toConsole = false)
     {
         if (!Settings.DebugLogging)
             return;
-        WriteLog($"[Debug] {resolver.Invoke()}");
+        if (!toConsole)
+            WriteLog($"[Debug] {resolver.Invoke()}");
+        else
+            UnityEngine.Debug.Log(PrefixLog($"[Debug] {resolver.Invoke()}"));
     }
 
-    public static void Log(object msg)
+    public static void Log(object msg, bool toConsole = false)
     {
-        WriteLog($"[Info] {msg}");
+        if (!toConsole)
+            WriteLog($"[Info] {msg}");
+        else
+            UnityEngine.Debug.Log(PrefixLog($"[Info] {msg}"));
     }
 
-    public static void LogWarning(object msg)
+    public static void LogWarning(object msg, bool toConsole = false)
     {
-        WriteLog($"[Warning] {msg}");
+        if (!toConsole && !Settings.LogToConsole)
+            WriteLog($"[Warning] {msg}");
+        else
+            UnityEngine.Debug.LogWarning(PrefixLog($"[Warning] {msg}"));
     }
 
-    public static void LogError(object msg)
+    public static void LogError(object msg, bool toConsole = false)
     {
-        WriteLog($"[Error] {msg}");
+        if (!toConsole && !Settings.LogToConsole)
+            WriteLog($"[Error] {msg}");
+        else
+            UnityEngine.Debug.LogError(PrefixLog($"[Error] {msg}"));
     }
 
-    public static void LogException(object msg, Exception e)
+    public static void LogException(object msg, Exception e, bool toConsole = false)
     {
-        ModEntry.Logger.LogException($"{msg}", e);
+        if (!toConsole && !Settings.LogToConsole)
+            ModEntry.Logger.LogException(PrefixLog($"{(msg)}"), e);
+        else
+            UnityEngine.Debug.LogException(e);
     }
 
-    private static void WriteLog(string msg)
+    private static void WriteLog(string msg, bool toConsole = false)
     {
-        string str = $"[{DateTime.Now.ToUniversalTime():HH:mm:ss.fff}] {msg}";
+        string str = PrefixLog(msg, toConsole);
         if (Settings.EnableLogFile)
             File.AppendAllLines(LOG_FILE, new[] { str });
-        ModEntry.Logger.Log(str);
+        if (!toConsole)
+            ModEntry.Logger.Log(str);
+        else
+            UnityEngine.Debug.Log(str);
     }
 
+    private static string PrefixLog(string msg, bool toConsole = false) => $"{(toConsole ? "[Multiplayer] " : string.Empty)}[{DateTime.Now.ToUniversalTime():HH:mm:ss.fff}] {msg}";
     #endregion
 }

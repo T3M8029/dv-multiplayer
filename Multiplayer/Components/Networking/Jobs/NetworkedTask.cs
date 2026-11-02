@@ -1,8 +1,15 @@
 using DV.Logic.Job;
 using HarmonyLib;
 using Multiplayer.Components.Networking.Train;
+using Multiplayer.Components.Networking.World;
+using Multiplayer.Networking.Packets.Clientbound.Jobs;
+using Multiplayer.Utils;
 using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using UnityEngine;
 
 namespace Multiplayer.Components.Networking.Jobs;
 
@@ -47,6 +54,9 @@ public class NetworkedTask : IdMonoBehaviour<ushort, NetworkedTask>
         return false;
     }
     #endregion
+
+    public static readonly Queue<ClientboundTaskUpdatePacket> ClientboundTaskUpdateQueue = new();
+    public static bool taskUpdateProcessing = false;
 
     protected override bool IsIdServerAuthoritative => true;
 
@@ -121,5 +131,109 @@ public class NetworkedTask : IdMonoBehaviour<ushort, NetworkedTask>
     public void UpdateCar(Car car)
     {
         if (NetworkedTrainCar.TryGetNetId(car, out var carNetId) && NetworkedJob.TryGetNetId(Task.Job, out var jobNetId)) NetworkLifecycle.Instance.Server.SendTaskCarUpdate(jobNetId, NetId, carNetId);
+    }
+
+    public static IEnumerator ProcessClientboundTaskUpdatePackets()
+    {
+        try
+        {
+            while (ClientboundTaskUpdateQueue.Count > 0)
+            {
+                ClientboundTaskUpdatePacket packet = ClientboundTaskUpdateQueue.Dequeue();
+                bool jobExists = NetworkedJob.Get(packet.JobNetId, out NetworkedJob netJob);
+                Multiplayer.Log(() => $"Processing ClientboundTaskUpdatePacket for task with id {packet.TaskNetId} of job [{netJob?.Job.ID ?? "!unknown ID!"}, {packet.JobNetId}], {ClientboundTaskUpdateQueue.Count} other updates still in queue");
+
+                if (!jobExists)
+                    NetworkedStationController.RequestSpecificJobs([packet.JobNetId], null);
+
+                if ((NetworkedStationController.WaitingNSCs.Any()) || (NetworkedStationController.DelayedJobs.Contains(packet.JobNetId)))
+                {
+                    var st = Stopwatch.StartNew();
+                    if (NetworkedStationController.WaitingNSCs.Any())
+                        Multiplayer.LogDebug(() => $"NetworkClient.ProcessClientboundTaskUpdatePackets: Stations are waiting for new jobs, task updates will be processed later");
+
+                    yield return new WaitUntil(() => !NetworkedStationController.WaitingNSCs.Any() || st.Elapsed.Seconds >= 10);
+
+                    if (st.Elapsed.Seconds >= 10)
+                        Multiplayer.LogWarning("NetworkClient.ProcessClientboundTaskUpdatePackets timed out waiting for waitingNSCs");
+
+                    yield return null;
+
+                    if (NetworkedStationController.DelayedJobs.Contains(packet.JobNetId))
+                        Multiplayer.LogDebug(() => $"NetworkClient.ProcessClientboundTaskUpdatePackets: Job with netId {packet.JobNetId} is delayed in its creation, will wait with task updating");
+                    yield return new WaitUntil(() => !NetworkedStationController.DelayedJobs.Contains(packet.JobNetId) || st.Elapsed.Seconds >= 20);
+
+                    if (st.Elapsed.Seconds >= 20)
+                        Multiplayer.LogWarning($"NetworkClient.ProcessClientboundTaskUpdatePackets timed out waiting for delayed job with netId {packet.JobNetId}");
+
+                    yield return null;
+
+                    st.Reset();
+                }
+
+                if (NetworkedTask.TryGet(packet.TaskNetId, out NetworkedTask netTask) && netTask != null)
+                {
+                    netTask.ApplyUpdate(packet);
+                }
+                else
+                {
+                    Multiplayer.LogError($"Received task update for taskNetId {packet.TaskNetId} of job [{netJob?.Job.ID ?? "!unknown ID!"}, {packet.JobNetId}] but netTask was not found!", true);
+                    continue;
+                }
+
+                yield return WaitFor.EndOfFrame;
+            }
+        }
+        finally
+        {
+            taskUpdateProcessing = false;
+        }
+    }
+
+    private void ApplyUpdate(ClientboundTaskUpdatePacket packet)
+    {
+
+        if (packet.TaskStateUpdate == true)
+        {
+            Task.SetState(packet.NewState);
+            Task.taskStartTime = packet.TaskStartTime;
+            Task.taskFinishTime = packet.TaskFinishTime;
+            Multiplayer.LogDebug(() => $"NetworkClient.ProcessClientboundTaskUpdatePackets: Successful task state update for task with id {packet.TaskNetId}");
+        }
+
+        if (packet.ReplaceDestTrack == true)
+        {
+            var track = (NetworkedRailTrack.TryGet(packet.DestTrackId, out RailTrack railTrack) ? railTrack.LogicTrack() : null);
+            if (track != null) Traverse.Create(Task).Field("destinationTrack").SetValue(track);
+            Multiplayer.LogDebug(() => $"NetworkClient.ProcessClientboundTaskUpdatePackets: Successful destination track update for task with id {packet.TaskNetId}");
+        }
+
+        if (packet.ReplaceCar == true)
+        {
+            Multiplayer.LogDebug(() => $"NetworkClient.ProcessClientboundTaskUpdatePackets: Car update for task with id {packet.TaskNetId} started");
+
+            if (!NetworkedTrainCar.TryGet(packet.CarNetID, out Car car))
+            {
+                Multiplayer.LogError($"No car for netId {packet.CarNetID} found, skipping replacement!");
+            }
+            else
+            {
+                var cars = Traverse.Create(Task).Field("cars").GetValue<IList<Car>>();
+                Car carToReplace = cars.FirstOrDefault(c => c.ID == car.ID);
+                if (cars != null && cars.Contains(carToReplace))
+                {
+                    var job = Task.Job;
+                    var jobToCarsDict = JobsManager.Instance.jobToJobCars;
+                    if (jobToCarsDict.TryGetValue(job, out var dictCars))
+                        jobToCarsDict[job] = (dictCars?.Replace(carToReplace, car).ToHashSet());
+
+                    cars.Replace(carToReplace, car);
+                    NetworkedStationController.UpdateCarPlates([packet.CarNetID], job.ID);
+                    Multiplayer.LogDebug(() => $"ProcessClientboundTaskUpdatePackets() successfully updated car reference {car.ID} in {Task.GetType().Name} with netId {packet.TaskNetId} for job {Task.Job.ID}");
+                }
+                else
+                    Multiplayer.LogWarning($"{Task.GetType().Name} with netId {packet.TaskNetId} for job {Task.Job.ID} doesn't have relevant cars!");
+            }
+        }
     }
 }

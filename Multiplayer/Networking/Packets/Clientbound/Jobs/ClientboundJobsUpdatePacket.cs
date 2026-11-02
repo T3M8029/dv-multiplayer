@@ -16,12 +16,12 @@ public class ClientboundJobsUpdatePacket
     {
         Multiplayer.Log($"ClientboundJobsUpdatePacket.FromNetworkedJobs({stationNetID}, {jobs.Length})");
 
-        List<JobUpdateStruct> jobData = new List<JobUpdateStruct>();
+        List<JobUpdateStruct> jobData = [];
         foreach (var job in jobs)
         {
             uint validationStationNetId = 0;
             ushort validationItemNetId = 0;
-            ItemPositionData itemPositionData = new ItemPositionData();
+            ItemPositionData itemPositionData = new();
 
             if (NetworkedStationController.GetFromJobValidator(job.JobValidator, out NetworkedStationController netValidationStation))
                 validationStationNetId = netValidationStation.NetId;
@@ -42,7 +42,7 @@ public class ClientboundJobsUpdatePacket
                     break;
             }
 
-            JobUpdateStruct data = new JobUpdateStruct
+            JobUpdateStruct data = new()
             {
                 JobNetID = job.NetId,
                 JobState = job.Job.State,
@@ -57,9 +57,9 @@ public class ClientboundJobsUpdatePacket
         }
 
         return new ClientboundJobsUpdatePacket
-                                                {
-                                                    StationNetId = stationNetID,
-                                                    JobUpdates = jobData.ToArray()
-                                                };
+        {
+            StationNetId = stationNetID,
+            JobUpdates = jobData.ToArray()
+        };
     }
 }

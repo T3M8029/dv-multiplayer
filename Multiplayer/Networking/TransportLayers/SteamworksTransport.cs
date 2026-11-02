@@ -187,6 +187,8 @@ public class SteamWorksTransport : ITransport
 
     public void UpdateSettings(Settings settings)
     {
+        SteamNetworkingUtils.Timeout = settings.ActiveConnectionTimeout;
+
         float chance = 0f;
         if (settings.SimulatePacketLoss)
             chance = settings.SimulationPacketLossChance;

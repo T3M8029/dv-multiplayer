@@ -81,9 +81,6 @@ public class NetworkClient : NetworkManager
     internal bool railwayStateLoaded = false;
     internal bool noCarTimeout = false;
 
-    private Queue<ClientboundTaskUpdatePacket> ClientboundTaskUpdateQueue = new();
-    private bool taskUpdateProcessing;
-
     private Queue<ClientboundJobsUpdatePacket> ClientboundJobUpdateQueue = new();
     private bool jobUpdateProcessing;
 
@@ -1244,7 +1241,7 @@ public class NetworkClient : NetworkManager
     {
         if (NetworkLifecycle.Instance.IsHost()) return;
 
-        LogDebug(() => $"Recieved ClientboundJobsUpdatePacket for station with id {packet.StationNetId} with {packet.JobUpdates.Length} potential updates");
+        LogDebug(() => $"Received ClientboundJobsUpdatePacket for station with id {packet.StationNetId} with {packet.JobUpdates.Length} potential updates");
 
         ClientboundJobUpdateQueue.Enqueue(packet.Clone());
         if (!jobUpdateProcessing)
@@ -1271,7 +1268,7 @@ public class NetworkClient : NetworkManager
 
             int waitingNSCsFrameCounter = 0;
 
-            if (NetworkedStationController.WaitingNSCs.Contains(packet.StationNetId)) LogDebug(() => $"Station {networkedStationController.StationController.stationInfo.YardID} is waiting for new jobs, job updates will be processed later");
+            if (NetworkedStationController.WaitingNSCs.Contains(packet.StationNetId)) Log(() => $"Station {networkedStationController.StationController.stationInfo.YardID} is waiting for new jobs, job updates will be processed later");
             while (waitingNSCsFrameCounter < 600 && NetworkedStationController.WaitingNSCs.Contains(packet.StationNetId))
             {
                 waitingNSCsFrameCounter++;
@@ -1280,7 +1277,7 @@ public class NetworkClient : NetworkManager
 
             if (waitingNSCsFrameCounter >= 600) LogWarning($"NetworkClient.ProcessClientboundJobUpdatePackets timed out waiting for NSC with netId {packet.StationNetId}");
 
-            yield return networkedStationController.UpdateJobs(packet.StationNetId, packet.JobUpdates);
+            yield return networkedStationController.UpdateJobs(packet.JobUpdates);
         }
 
         jobUpdateProcessing = false;
@@ -1290,115 +1287,13 @@ public class NetworkClient : NetworkManager
     {
         if (NetworkLifecycle.Instance.IsHost()) return;
 
-        LogDebug(() => $"Recieved ClientboundTaskUpdatePacket for task with id {packet.TaskNetId} of job with id {packet.JobNetId}");
+        LogDebug(() => $"Received ClientboundTaskUpdatePacket for task with id {packet.TaskNetId} of job with id {packet.JobNetId}");
 
-        ClientboundTaskUpdateQueue.Enqueue(packet.Clone());
-        if (!taskUpdateProcessing)
+        NetworkedTask.ClientboundTaskUpdateQueue.Enqueue(packet.Clone());
+        if (!NetworkedTask.taskUpdateProcessing)
         {
-            taskUpdateProcessing = true;
-            CoroutineManager.Instance.Run(ProcessClientboundTaskUpdatePackets());
-        }
-    }
-
-    private IEnumerator ProcessClientboundTaskUpdatePackets()
-    {
-        try
-        {
-            while (ClientboundTaskUpdateQueue.Count > 0)
-            {
-                var packet = ClientboundTaskUpdateQueue.Dequeue();
-                LogDebug(() => $"Processing ClientboundTaskUpdatePacket for task with id {packet.TaskNetId} of job with id {packet.JobNetId}, {ClientboundTaskUpdateQueue.Count} other updates still in queue");
-
-                if ((NetworkedStationController.WaitingNSCs.Any()) || (NetworkedStationController.DelayedJobs.Contains(packet.JobNetId)))
-                { 
-                    var st = Stopwatch.StartNew();
-                    if (NetworkedStationController.WaitingNSCs.Any())
-                        LogDebug(() => $"NetworkClient.ProcessClientboundTaskUpdatePackets: Stations are waiting for new jobs, task updates will be processed later");
-
-                    yield return new WaitUntil(() => !NetworkedStationController.WaitingNSCs.Any() || st.Elapsed.Seconds >= 10);
-
-                    if (st.Elapsed.Seconds >= 10)
-                        LogWarning("NetworkClient.ProcessClientboundTaskUpdatePackets timed out waiting for waitingNSCs");
-
-                    yield return null;
-
-                    if (NetworkedStationController.DelayedJobs.Contains(packet.JobNetId))
-                        Multiplayer.LogDebug(() => $"NetworkClient.ProcessClientboundTaskUpdatePackets: Job with netId {packet.JobNetId} is delayed in its creation, will wait with task updating");
-                    yield return new WaitUntil(() => !NetworkedStationController.DelayedJobs.Contains(packet.JobNetId) || st.Elapsed.Seconds >= 20);
-
-                    if (st.Elapsed.Seconds >= 20)
-                        LogWarning($"NetworkClient.ProcessClientboundTaskUpdatePackets timed out waiting for delayed job with netId {packet.JobNetId}");
-
-                    yield return null;
-
-                    st.Reset();
-                }
-
-                if (!NetworkedTask.TryGet(packet.TaskNetId, out Task task) || task == null)
-                {
-                    LogError($"Received task update for taskNetId {packet.TaskNetId}, task was not found");
-                    continue;
-                }
-
-                if (packet.TaskStateUpdate == true)
-                {
-                    task.SetState(packet.NewState);
-                    task.taskStartTime = packet.TaskStartTime;
-                    task.taskFinishTime = packet.TaskFinishTime;
-                    LogDebug(() => $"NetworkClient.ProcessClientboundTaskUpdatePackets: Successful task state update for task with id {packet.TaskNetId}");
-                }
-
-                if (packet.ReplaceDestTrack == true)
-                {
-                    var track = (NetworkedRailTrack.TryGet(packet.DestTrackId, out RailTrack railTrack) ? railTrack.LogicTrack() : null);
-                    if (track != null) Traverse.Create(task).Field("destinationTrack").SetValue(track);
-                    LogDebug(() => $"NetworkClient.ProcessClientboundTaskUpdatePackets: Successful destination track update for task with id {packet.TaskNetId}");
-                }
-
-                if (packet.ReplaceCar == true)
-                {
-                    LogDebug(() => $"NetworkClient.ProcessClientboundTaskUpdatePackets: Car update for task with id {packet.TaskNetId} started");
-
-                    int carWaitCounter = 0;
-                    if (!NetworkedTrainCar.TryGet(packet.CarNetID, out Car _)) LogWarning($"ProcessClientboundTaskUpdatePackets() car with netId {packet.CarNetID} not found yet, waiting!");
-                    while (carWaitCounter < 600 && !NetworkedTrainCar.TryGet(packet.CarNetID, out Car _))
-                    {
-                        carWaitCounter++;
-                        yield return null;
-                    }
-                    if (carWaitCounter >= 600) LogWarning($"ProcessClientboundTaskUpdatePackets() timed out waiting for car with netId {packet.CarNetID}!");
-
-                    if (!NetworkedTrainCar.TryGet(packet.CarNetID, out Car car))
-                    {
-                        LogError($"No car for netId {packet.CarNetID} found, skipping replacement!");
-                    }
-                    else
-                    {
-                        var cars = Traverse.Create(task).Field("cars").GetValue<IList<Car>>();
-                        Car carToReplace = cars.FirstOrDefault(c => c.ID == car.ID);
-                        if (cars != null && cars.Contains(carToReplace))
-                        {
-                            var job = task.Job;
-                            var jobToCarsDict = JobsManager.Instance.jobToJobCars;
-                            if (jobToCarsDict.TryGetValue(job, out var dictCars)) jobToCarsDict[job] = (dictCars?.Replace(carToReplace, car).ToHashSet());
-                            if (NetworkedJob.TryGetFromJob(job, out var netJob) && netJob.Station != null)
-                            {
-                                cars.Replace(carToReplace, car);
-                                netJob.Station.UpdateCarPlates([packet.CarNetID], job.ID);
-                                LogDebug(() => $"ProcessClientboundTaskUpdatePackets() successfully updated car reference {car.ID} in {task.GetType().Name} with netId {packet.TaskNetId} for job {task.Job.ID}");
-                            }
-                            else LogError($"Why..., just WHY ?!?");
-                        }
-                        else LogWarning($"{task.GetType().Name} with netId {packet.TaskNetId} for job {task.Job.ID} doesn´t have relevant cars!");
-                    }
-                }
-
-                yield return WaitFor.EndOfFrame;
-            }
-        }
-        finally
-        {
-            taskUpdateProcessing = false;
+            NetworkedTask.taskUpdateProcessing = true;
+            CoroutineManager.Instance.Run(NetworkedTask.ProcessClientboundTaskUpdatePackets());
         }
     }
 
@@ -1995,7 +1890,7 @@ public class NetworkClient : NetworkManager
 
     public void SendJobsRequest(NetworkedStationController station, ushort[] alreadyPresent, bool generateJobs, ushort[] specificJobs)
     {
-        LogDebug(() => $"Client asking for jobs in {station.StationController.stationInfo.YardID}, excluding {alreadyPresent.Length} already present jobs ");
+        LogDebug(() => $"Client asking for jobs in {station?.StationController.stationInfo.YardID}, excluding {alreadyPresent.Length} already present jobs ");
         noCarTimeout = true;
         NetworkedStationController.WaitingNSCs.Add(station.NetId);
 

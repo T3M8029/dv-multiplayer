@@ -966,7 +966,8 @@ public class NetworkServer : NetworkManager
 
     public void SendJobsCreatePacket(NetworkedStationController networkedStation, NetworkedJob[] jobs, ITransportPeer peer = null)
     {
-        Log($"Sending JobsCreatePacket for stationNetId {networkedStation.NetId} with {jobs.Count()} jobs");
+        Log($"Sending JobsCreatePacket for [{networkedStation.StationController.stationInfo.YardID}, {networkedStation.NetId}] with {jobs.Count()} jobs");
+        LogDebug(() => $"[{string.Join(", ", jobs.Select(j => j.Job.ID))}]");
 
         var packet = ClientboundJobsCreatePacket.FromNetworkedJobs(networkedStation, jobs);
 
@@ -1398,10 +1399,7 @@ public class NetworkServer : NetworkManager
                             .Where(j => j.Job.State == JobState.Available || j.Job.State == JobState.InProgress)
                             .ToArray();
 
-                        for (int i = 0; i < jobs.Length; i++)
-                        {
-                            SendJobsCreatePacket(netStation, [jobs[i]], peer);
-                        }
+                        SendJobsCreatePacket(netStation, jobs, peer);
                     }
                     else
                     {
@@ -2093,63 +2091,79 @@ public class NetworkServer : NetworkManager
 
     private void OnServerboundJobsRequestPacket(ServerboundJobsRequestPacket packet, ITransportPeer peer)
     {
-        LogDebug(() => $"ServerboundJobsRequestPacket for station {packet.StationNetId}");
+        LogDebug(() => $"ServerboundJobsRequestPacket for {((packet.StationNetId < 1) ? ("all stations") : (packet.StationNetId))}");
 
-        if (!NetworkedStationController.Get(packet.StationNetId, out var networkedStationController))
-        {
-            LogWarning($"ServerboundJobsRequestPacket() invalid station net id {packet.StationNetId}");
-            return;
-        }
-
-        CoroutineManager.Instance.Run(SendJobsToClientsOnRequest(packet, networkedStationController));
+        CoroutineManager.Instance.Run(SendJobsToClientsOnRequest(packet, peer));
     }
 
-    private IEnumerator SendJobsToClientsOnRequest(ServerboundJobsRequestPacket packet, NetworkedStationController networkedStationController)
+    private IEnumerator SendJobsToClientsOnRequest(ServerboundJobsRequestPacket packet, ITransportPeer peer)
     {
-        if (PersistentJobs.Active)
+        if (NetworkedStationController.Get(packet.StationNetId, out var networkedStationController))
         {
-            if (PersistentJobs.ResumeCoroRunning)
-                LogDebug(() => $"ServerboundJobsRequestPacket station {packet.StationNetId} is probably resuming cars, waiting");
-
-            while (PersistentJobs.ResumeCoroRunning)
-                yield return null;
-        }
-
-        if (packet.GenerateJobs)
-        {
-            LogDebug(() => $"ServerboundJobsRequestPacket requested job generation for station {packet.StationNetId}");
-
-            if (!networkedStationController.StationController.ProceduralJobsController.IsJobGenerationActive)
+            if (PersistentJobs.Active)
             {
-                networkedStationController.StationController.ProceduralJobsController.TryToGenerateJobs();
-                yield return null;
+                if (PersistentJobs.ResumeCoroRunning)
+                    LogDebug(() => $"ServerboundJobsRequestPacket cars are resuming, waiting");
+
+                while (PersistentJobs.ResumeCoroRunning)
+                    yield return null;
             }
-            else
+
+            if (packet.GenerateJobs)
             {
-                LogDebug(() => $"ServerboundJobsRequestPacket station {packet.StationNetId} is already generating, won´t trigger again");
+                LogDebug(() => $"ServerboundJobsRequestPacket requested job generation for station {packet.StationNetId}");
+
+                if (!networkedStationController.StationController.ProceduralJobsController.IsJobGenerationActive)
+                {
+                    networkedStationController.StationController.ProceduralJobsController.TryToGenerateJobs();
+                    yield return null;
+                }
+                else
+                {
+                    LogDebug(() => $"ServerboundJobsRequestPacket station {packet.StationNetId} is already generating, won´t trigger again");
+                }
+            }
+
+            if (PersistentJobs.Active)
+            {
+                if (PersistentJobs.ResumeCoroRunning)
+                    LogDebug(() => $"ServerboundJobsRequestPacket station {packet.StationNetId} is probably resuming cars, waiting");
+
+                while (PersistentJobs.ResumeCoroRunning)
+                    yield return null;
+            }
+
+            if (networkedStationController.StationController.ProceduralJobsController.IsJobGenerationActive)
+                LogDebug(() => $"Station {networkedStationController.StationController.stationInfo.YardID} is still generating jobs, will wait with sending");
+
+            while (networkedStationController.StationController.ProceduralJobsController.IsJobGenerationActive)
+                yield return null;
+
+            NetworkedJob[] send = (packet.SpecificJobsNetIds.Any())
+                ? networkedStationController.NetworkedJobs.Where(nj => packet.SpecificJobsNetIds.Contains(nj.NetId)).ToArray()
+                : networkedStationController.NetworkedJobs.Where(nj => !packet.ExcludeJobNetId.Contains(nj.NetId)).ToArray();
+
+            NetworkLifecycle.Instance.Server.SendJobsCreatePacket(networkedStationController, send, peer);
+        }
+        else
+        {
+            if (packet.GenerateJobs || packet.ExcludeJobNetId.Any() || packet.SpecificJobsNetIds.Length < 1)
+            {
+                LogError("ServerboundJobsRequestPacket contains invalid option combinations");
+
+                foreach (var jobNetID in packet.SpecificJobsNetIds)
+                {
+                    if (NetworkedJob.Get(jobNetID, out var netJob))
+                    {
+                        NetworkLifecycle.Instance.Server.SendJobsCreatePacket(netJob.Station, [netJob], peer);
+                    }
+                    else
+                    {
+                        LogError($"Peer {peer.Id} requested job with netID {jobNetID} doesn't exist for server!");
+                    }
+                }
             }
         }
-
-        if (PersistentJobs.Active)
-        {
-            if (PersistentJobs.ResumeCoroRunning)
-                LogDebug(() => $"ServerboundJobsRequestPacket station {packet.StationNetId} is probably resuming cars, waiting");
-
-            while (PersistentJobs.ResumeCoroRunning)
-                yield return null;
-        }
-
-        if (networkedStationController.StationController.ProceduralJobsController.IsJobGenerationActive)
-            LogDebug(() => $"Station {networkedStationController.StationController.stationInfo.YardID} is still generating jobs, will wait with sending");
-
-        while (networkedStationController.StationController.ProceduralJobsController.IsJobGenerationActive)
-            yield return null;
-
-        NetworkedJob[] send = (packet.SpecificJobsNetIds.Any())
-            ? networkedStationController.NetworkedJobs.Where(nj => packet.SpecificJobsNetIds.Contains(nj.NetId)).ToArray()
-            : networkedStationController.NetworkedJobs.Where(nj => !packet.ExcludeJobNetId.Contains(nj.NetId)).ToArray();
-
-        NetworkLifecycle.Instance.Server.SendJobsCreatePacket(networkedStationController, send);
     }
 
     private void OnServerboundWarehouseMachineControllerRequestPacket(ServerboundWarehouseMachineControllerRequestPacket packet, ITransportPeer peer)

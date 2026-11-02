@@ -81,6 +81,8 @@ public class Settings : UnityModManager.ModSettings, IDrawable
     public KeyCode ChatKey = KeyCode.Return;
     [Draw("Hide Chat Messages", Tooltip = "Hide incoming chat messages.")]
     public bool HideChatMessages = false;
+    [Draw("Write Log Messages to Console", Tooltip = "Writes \"Multiplayer.LogWarning()\" and \"Multiplayer.LogError()\" messages to the game console")]
+    public bool LogToConsole = true;
 
     [Space(10)]
     [Header("Advanced Settings")]
@@ -116,6 +118,8 @@ public class Settings : UnityModManager.ModSettings, IDrawable
 #if DEBUG
     [Draw("Export Save Data On Load", VisibleOn = "ShowAdvancedSettings|true")]
     public bool ExportSaveOnLoad = false;
+    [Draw("Active Connection Timeout (ms)", VisibleOn = "ShowAdvancedSettings|true")]
+    public int ActiveConnectionTimeout = 5000;
 #endif
 
     public void Draw(UnityModManager.ModEntry modEntry)

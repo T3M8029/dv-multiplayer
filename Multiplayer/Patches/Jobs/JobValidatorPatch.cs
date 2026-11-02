@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Linq;
 using DV.ThingTypes;
 using HarmonyLib;
 using Multiplayer.Components.Networking;
@@ -36,7 +37,7 @@ public static class JobValidator_Patch
 
         if(!NetworkedJob.TryGetFromJob(jobOverview.job, out NetworkedJob networkedJob) || jobOverview.job.State != JobState.Available)
         {
-            NetworkLifecycle.Instance.Client.LogWarning($"Processing JobOverview {jobOverview?.job?.ID} {(networkedJob == null ? "NetworkedJob not found!, " : "")}Job state: {jobOverview?.job?.State}");
+            Multiplayer.LogWarning($"Processing JobOverview {jobOverview?.job?.ID} {(networkedJob == null ? "NetworkedJob not found!, " : "")}Job state: {jobOverview?.job?.State}", true);
             __instance.bookletPrinter.PlayErrorSound();
             jobOverview.DestroyJobOverview();
             return false;
@@ -148,5 +149,16 @@ public static class JobValidator_Patch
         networkedJob.ValidatorResponseReceived = false;
         networkedJob.ValidationAccepted = false;
 
+    }
+
+    [HarmonyPatch(nameof(JobValidator.SummonAllActiveJobBooklets))]
+    [HarmonyPrefix]
+    public static void SummonAllActiveJobBooklets_Prefix(JobValidator __instance)
+    {
+        if (NetworkedStationController.GetFromJobValidator(__instance, out var nsc))
+        {
+            nsc.RequestAdditionalJobs(false);
+            NetworkedStationController.RequestSpecificJobs(nsc.NetworkedJobs.Where(nj => (nj.Job.State == JobState.Available && nj.JobOverview is null) || (nj.Job.State == JobState.InProgress && nj.JobBooklet is null)).Select(nj => nj.NetId), nsc);
+        }
     }
 }
