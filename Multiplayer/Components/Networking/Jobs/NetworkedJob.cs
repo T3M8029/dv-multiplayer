@@ -271,18 +271,21 @@ public class NetworkedJob : IdMonoBehaviour<ushort, NetworkedJob>
     {
         Cause = DirtyCause.JobState;
         OnJobDirty?.Invoke(this);
+        if (!NetworkLifecycle.Instance.IsHost()) JobsManager.Instance.UnregisterJob(job);
     }
 
     private void OnJobCompleted(Job job)
     {
         Cause = DirtyCause.JobState;
         OnJobDirty?.Invoke(this);
+        if (!NetworkLifecycle.Instance.IsHost()) JobsManager.Instance.UnregisterJob(job);
     }
 
     private void OnJobExpired(Job job)
     {
         Cause = DirtyCause.JobState;
         OnJobDirty?.Invoke(this);
+        if (!NetworkLifecycle.Instance.IsHost()) JobsManager.Instance.UnregisterJob(job);
     }
 
     private void OnJobTrackChanged(Job job)
@@ -312,7 +315,7 @@ public class NetworkedJob : IdMonoBehaviour<ushort, NetworkedJob>
         {
             if (PersistentJobs.ResumeCoroRunning) Multiplayer.LogDebug(() => $"Cars still resuming, waiting with job car changes");
 
-            yield return new WaitUntil(() => PersistentJobs.ResumeCoroRunning == false);
+            yield return NetworkedTask.AwaitConditionOrTimeout((() => PersistentJobs.ResumeCoroRunning == false), 240, 0.5f, (() => Multiplayer.LogError($"Job car change for job {jct.Item1.ID} and car {jct.Item2.ID} not sent, timed out resuming cars!", true)));
         }
         yield return null;
 

@@ -9,6 +9,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using Unity.Jobs;
 using UnityEngine;
 
 namespace Multiplayer.Components.Networking.Jobs;
@@ -144,40 +145,34 @@ public class NetworkedTask : IdMonoBehaviour<ushort, NetworkedTask>
                 Multiplayer.Log(() => $"Processing ClientboundTaskUpdatePacket for task with id {packet.TaskNetId} of job [{netJob?.Job.ID ?? "!unknown ID!"}, {packet.JobNetId}], {ClientboundTaskUpdateQueue.Count} other updates still in queue");
 
                 if (!jobExists)
+                {
                     NetworkedStationController.RequestSpecificJobs([packet.JobNetId], null);
+                    yield return AwaitConditionOrTimeout((() => !NetworkedStationController.PendingJobs.Contains(packet.JobNetId)), 10f, 0.5f);
+                }
 
                 if ((NetworkedStationController.WaitingNSCs.Any()) || (NetworkedStationController.DelayedJobs.Contains(packet.JobNetId)))
                 {
-                    var st = Stopwatch.StartNew();
                     if (NetworkedStationController.WaitingNSCs.Any())
+                    {
                         Multiplayer.LogDebug(() => $"NetworkClient.ProcessClientboundTaskUpdatePackets: Stations are waiting for new jobs, task updates will be processed later");
-
-                    yield return new WaitUntil(() => !NetworkedStationController.WaitingNSCs.Any() || st.Elapsed.Seconds >= 10);
-
-                    if (st.Elapsed.Seconds >= 10)
-                        Multiplayer.LogWarning("NetworkClient.ProcessClientboundTaskUpdatePackets timed out waiting for waitingNSCs");
-
-                    yield return null;
+                        yield return NetworkedTask.AwaitConditionOrTimeout(() => !NetworkedStationController.WaitingNSCs.Any(), 10f, 0.5f, () => Multiplayer.LogWarning($"NetworkClient.ProcessClientboundTaskUpdatePackets for job with netId {packet.JobNetId} timed out waiting for waitingNSCs"));
+                    }
 
                     if (NetworkedStationController.DelayedJobs.Contains(packet.JobNetId))
+                    {
                         Multiplayer.LogDebug(() => $"NetworkClient.ProcessClientboundTaskUpdatePackets: Job with netId {packet.JobNetId} is delayed in its creation, will wait with task updating");
-                    yield return new WaitUntil(() => !NetworkedStationController.DelayedJobs.Contains(packet.JobNetId) || st.Elapsed.Seconds >= 20);
-
-                    if (st.Elapsed.Seconds >= 20)
-                        Multiplayer.LogWarning($"NetworkClient.ProcessClientboundTaskUpdatePackets timed out waiting for delayed job with netId {packet.JobNetId}");
-
-                    yield return null;
-
-                    st.Reset();
+                        yield return NetworkedTask.AwaitConditionOrTimeout(() => !NetworkedStationController.DelayedJobs.Contains(packet.JobNetId), 10f, 0.5f, () => Multiplayer.LogWarning($"NetworkClient.ProcessClientboundTaskUpdatePackets timed out waiting for delayed job with netId {packet.JobNetId}"));
+                    }
                 }
 
-                if (NetworkedTask.TryGet(packet.TaskNetId, out NetworkedTask netTask) && netTask != null)
+                if (NetworkedJob.Get(packet.JobNetId, out netJob) && NetworkedTask.TryGet(packet.TaskNetId, out NetworkedTask netTask) && netTask != null)
                 {
                     netTask.ApplyUpdate(packet);
                 }
                 else
                 {
                     Multiplayer.LogError($"Received task update for taskNetId {packet.TaskNetId} of job [{netJob?.Job.ID ?? "!unknown ID!"}, {packet.JobNetId}] but netTask was not found!", true);
+                    NetworkedStationController.PendingJobs.Remove(packet.JobNetId);
                     continue;
                 }
 
@@ -188,6 +183,16 @@ public class NetworkedTask : IdMonoBehaviour<ushort, NetworkedTask>
         {
             taskUpdateProcessing = false;
         }
+    }
+
+    public static IEnumerator AwaitConditionOrTimeout(Func<bool> condition, float timeout, float checkInterval = 0.1f, Action onTimeout = null)
+    {
+        var startTime = Time.unscaledTime;
+        while (!condition.Invoke() && Time.unscaledTime - startTime < timeout)
+        {
+            yield return WaitFor.SecondsRealtime(checkInterval);
+        }
+        if ((onTimeout != null) && (Time.unscaledTime - startTime >= timeout)) onTimeout.Invoke();
     }
 
     private void ApplyUpdate(ClientboundTaskUpdatePacket packet)

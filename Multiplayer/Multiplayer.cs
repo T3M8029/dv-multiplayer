@@ -261,7 +261,7 @@ public static class Multiplayer
         if (!toConsole)
             WriteLog($"[Debug] {resolver.Invoke()}");
         else
-            UnityEngine.Debug.Log(PrefixLog($"[Debug] {resolver.Invoke()}"));
+            UnityEngine.Debug.Log($"{PrefixLog($"[Debug] {resolver.Invoke()}", toConsole)}");
     }
 
     public static void Log(object msg, bool toConsole = false)
@@ -269,7 +269,7 @@ public static class Multiplayer
         if (!toConsole)
             WriteLog($"[Info] {msg}");
         else
-            UnityEngine.Debug.Log(PrefixLog($"[Info] {msg}"));
+            UnityEngine.Debug.Log($"{PrefixLog($"[Info] {msg}", toConsole)}");
     }
 
     public static void LogWarning(object msg, bool toConsole = false)
@@ -277,7 +277,7 @@ public static class Multiplayer
         if (!toConsole && !Settings.LogToConsole)
             WriteLog($"[Warning] {msg}");
         else
-            UnityEngine.Debug.LogWarning(PrefixLog($"[Warning] {msg}"));
+            UnityEngine.Debug.LogWarning($"{PrefixLog($"[Warning] {msg}", toConsole)}");
     }
 
     public static void LogError(object msg, bool toConsole = false)
@@ -285,7 +285,7 @@ public static class Multiplayer
         if (!toConsole && !Settings.LogToConsole)
             WriteLog($"[Error] {msg}");
         else
-            UnityEngine.Debug.LogError(PrefixLog($"[Error] {msg}"));
+            UnityEngine.Debug.LogError($"{PrefixLog($"[Error] {msg}", toConsole)}");
     }
 
     public static void LogException(object msg, Exception e, bool toConsole = false)
@@ -293,7 +293,10 @@ public static class Multiplayer
         if (!toConsole && !Settings.LogToConsole)
             ModEntry.Logger.LogException(PrefixLog($"{(msg)}"), e);
         else
+        {
+            UnityEngine.Debug.Log($"{PrefixLog($"[Exception] {msg}", toConsole)}");
             UnityEngine.Debug.LogException(e);
+        }
     }
 
     private static void WriteLog(string msg, bool toConsole = false)

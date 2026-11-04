@@ -32,6 +32,8 @@ public static class BookletCreator_Patch
         }
     }
 
+    // moved further down the callchain (JobBooklet.AssignJob()) to hopefully capture existing booklets
+    /*
     [HarmonyPatch(nameof(BookletCreator.CreateJobBooklet))]
     [HarmonyPostfix]
     private static void CreateJobBooklet(JobBooklet __result, Job job)
@@ -49,7 +51,7 @@ public static class BookletCreator_Patch
             netItem.Initialize(__result, 0, false);
             networkedJob.JobBooklet = netItem;
         }
-    }
+    }*/
 
     [HarmonyPatch(nameof(BookletCreator.CreateJobReport))]
     [HarmonyPostfix]

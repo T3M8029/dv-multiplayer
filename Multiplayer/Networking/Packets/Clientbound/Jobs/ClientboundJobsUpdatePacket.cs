@@ -29,15 +29,15 @@ public class ClientboundJobsUpdatePacket
             switch (job.Cause)
             {
                 case NetworkedJob.DirtyCause.JobOverview:
-                    validationItemNetId = job.JobOverview.NetId;
+                    validationItemNetId = job.JobOverview?.NetId ?? 0;
                     itemPositionData = ItemPositionData.FromItem(job.JobOverview);
                     break;
                 case NetworkedJob.DirtyCause.JobBooklet:
-                    validationItemNetId = job.JobBooklet.NetId;
+                    validationItemNetId = job.JobBooklet?.NetId ?? 0;
                     itemPositionData = ItemPositionData.FromItem(job.JobBooklet);
                     break;
                 case NetworkedJob.DirtyCause.JobReport:
-                    validationItemNetId = job.JobReport.NetId;
+                    validationItemNetId = job.JobReport?.NetId ?? 0;
                     itemPositionData = ItemPositionData.FromItem(job.JobReport);
                     break;
             }

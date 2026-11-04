@@ -1,7 +1,10 @@
 using DV.Logic.Job;
 using HarmonyLib;
+using Multiplayer.Components.Networking;
 using Multiplayer.Components.Networking.Jobs;
 using Multiplayer.Components.Networking.World;
+using Multiplayer.Utils;
+using Unity.Jobs;
 
 
 namespace Multiplayer.Patches.Jobs;
@@ -24,6 +27,24 @@ public static class JobBooklet_Patch
     //        networkedJob.ValidationItem = netItem;
     //}
 
+    [HarmonyPatch(nameof(JobBooklet.AssignJob))]
+    [HarmonyPostfix]
+    private static void AssignJob_Postfix(JobBooklet __instance, Job jobToAssign)
+    {
+        if (!NetworkLifecycle.Instance.IsHost())
+            return;
+
+        if (!NetworkedJob.TryGetFromJob(jobToAssign, out NetworkedJob networkedJob))
+        {
+            Multiplayer.LogError($"JobBooklet.AssignJob_Postfix() NetworkedJob not found for Job ID: {jobToAssign.ID}");
+        }
+        else
+        {
+            NetworkedItem netItem = __instance.GetOrAddComponent<NetworkedItem>();
+            netItem.Initialize(__instance, 0, false);
+            networkedJob.JobBooklet = netItem;
+        }
+    }
 
     [HarmonyPatch(nameof(JobBooklet.DestroyJobBooklet))]
     [HarmonyPrefix]

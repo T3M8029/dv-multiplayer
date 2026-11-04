@@ -1892,11 +1892,16 @@ public class NetworkClient : NetworkManager
     {
         LogDebug(() => $"Client asking for jobs in {station?.StationController.stationInfo.YardID}, excluding {alreadyPresent.Length} already present jobs ");
         noCarTimeout = true;
-        NetworkedStationController.WaitingNSCs.Add(station.NetId);
+        uint stationId = 0;
+        if (station != null)
+        {
+            stationId = station.NetId;
+            NetworkedStationController.WaitingNSCs.Add(stationId);
+        }
 
         SendPacketToServer(new ServerboundJobsRequestPacket
         {
-            StationNetId = station.NetId,
+            StationNetId = stationId,
             GenerateJobs = generateJobs,
             SpecificJobsNetIds = specificJobs,
             ExcludeJobNetId = alreadyPresent

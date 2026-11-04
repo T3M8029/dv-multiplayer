@@ -2143,24 +2143,21 @@ public class NetworkServer : NetworkManager
                 ? networkedStationController.NetworkedJobs.Where(nj => packet.SpecificJobsNetIds.Contains(nj.NetId)).ToArray()
                 : networkedStationController.NetworkedJobs.Where(nj => !packet.ExcludeJobNetId.Contains(nj.NetId)).ToArray();
 
-            NetworkLifecycle.Instance.Server.SendJobsCreatePacket(networkedStationController, send, peer);
+            if (send.Length != 0) SendJobsCreatePacket(networkedStationController, send, peer);
+            SendJobsUpdatePacket(packet.StationNetId, networkedStationController.NetworkedJobs.Where(nj => !packet.SpecificJobsNetIds.Contains(nj.NetId)).ToArray());
         }
         else
         {
-            if (packet.GenerateJobs || packet.ExcludeJobNetId.Any() || packet.SpecificJobsNetIds.Length < 1)
+            if ((packet.GenerateJobs) || (packet.ExcludeJobNetId?.Any() == true) || (packet.SpecificJobsNetIds.Length < 1))
             {
                 LogError("ServerboundJobsRequestPacket contains invalid option combinations");
 
                 foreach (var jobNetID in packet.SpecificJobsNetIds)
                 {
                     if (NetworkedJob.Get(jobNetID, out var netJob))
-                    {
-                        NetworkLifecycle.Instance.Server.SendJobsCreatePacket(netJob.Station, [netJob], peer);
-                    }
+                        SendJobsCreatePacket(netJob.Station, [netJob], peer);
                     else
-                    {
-                        LogError($"Peer {peer.Id} requested job with netID {jobNetID} doesn't exist for server!");
-                    }
+                        LogError($"Peer {peer.Id} requested job with netID {jobNetID} doesn't exist for server!");                    
                 }
             }
         }

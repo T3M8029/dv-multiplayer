@@ -28,6 +28,8 @@
     
     <PropertyGroup>
         <NoWarn>$(NoWarn);CS0436</NoWarn>
+        <AssemblyVersion>0.1.17.0</AssemblyVersion>
+        <FileVersion>2</FileVersion>
     </PropertyGroup>
     
     <!-- Derail Valley References -->
